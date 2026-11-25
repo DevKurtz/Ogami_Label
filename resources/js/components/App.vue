@@ -12,6 +12,9 @@ const loading = ref(false);
 const error = ref('');
 const success = ref(null);
 const activePage = ref('upload');
+const labelImage = ref(null);
+const downloading = ref(false);
+const downloadError = ref('');
 const errorLines = computed(() => error.value.split('\n').filter(Boolean));
 const errorSummary = computed(() => {
     const missing = errorLines.value.map((line) => line.match(/^Row (\d+): (.+) is blank\.$/));
@@ -89,6 +92,40 @@ function moveRecord(step) {
 }
 function labelUrl(record) { return `/api/records/${record.id}/label.svg`; }
 function codeUrl(record, key) { return `/api/records/${record.id}/label.svg#${key}`; }
+async function downloadLabel(record) {
+    const image = labelImage.value;
+    if (!image || downloading.value) return;
+    downloading.value = true;
+    downloadError.value = '';
+    try {
+        if (typeof image.decode === 'function') await image.decode();
+        else if (!image.complete) await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; });
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 1800;
+        canvas.height = Math.round(canvas.width * 535 / 760);
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('PNG conversion is not available in this browser.');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, canvas.width, canvas.height);
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+        const png = await new Promise((resolve, reject) => canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error('The PNG image could not be created.')), 'image/png'));
+        const safeName = (selectedBatch.value?.name || 'ogami-label').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-').trim() || 'ogami-label';
+        const url = URL.createObjectURL(png);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${safeName}-row-${record.row_number}.png`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (exception) {
+        downloadError.value = 'Could not create the PNG image. Please wait for the label to load and try again.';
+    } finally {
+        downloading.value = false;
+    }
+}
 
 onMounted(async () => { try { await refreshBatches(); } catch (exception) { error.value = exception.message; } });
 </script>
@@ -163,9 +200,10 @@ onMounted(async () => { try { await refreshBatches(); } catch (exception) { erro
         </article>
         <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <template v-if="selectedRecord">
-            <div class="mb-4 flex items-center justify-between"><span class="text-sm text-slate-500">{{ selectedBatch?.name }} / Row {{ selectedRecord.row_number }} · {{ recordIndex+1 }} of {{ records.length }}</span><div class="flex gap-2"><button @click="moveRecord(-1)" :disabled="recordIndex<=0" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">‹ Previous</button><button @click="moveRecord(1)" :disabled="recordIndex>=records.length-1" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">Next ›</button><a :href="labelUrl(selectedRecord)" download="ogami-label.svg" class="rounded-lg bg-blue-600 px-3 py-2 text-white">Download SVG</a></div></div>
+            <div class="mb-4 flex items-center justify-between"><span class="text-sm text-slate-500">{{ selectedBatch?.name }} / Row {{ selectedRecord.row_number }} · {{ recordIndex+1 }} of {{ records.length }}</span><div class="flex gap-2"><button @click="moveRecord(-1)" :disabled="recordIndex<=0||downloading" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">‹ Previous</button><button @click="moveRecord(1)" :disabled="recordIndex>=records.length-1||downloading" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">Next ›</button><button @click="downloadLabel(selectedRecord)" :disabled="downloading" class="rounded-lg bg-blue-600 px-3 py-2 text-white disabled:opacity-50">{{ downloading ? 'Preparing PNG…' : 'Download PNG' }}</button></div></div>
             <p class="mb-2 text-xs text-slate-500">Label preview · Row {{ selectedRecord.row_number }} · Serial no. {{ selectedRecord.serial_no }}</p>
-            <img :key="selectedRecord.id" :src="labelUrl(selectedRecord)" class="mx-auto block w-full max-w-[900px]" alt="Accurately encoded Ogami product label" />
+            <img ref="labelImage" :key="selectedRecord.id" :src="labelUrl(selectedRecord)" class="mx-auto block w-full max-w-[900px]" alt="Accurately encoded Ogami product label" />
+            <p v-if="downloadError" role="alert" class="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{{ downloadError }}</p>
             <div class="mt-4 grid gap-2 rounded-lg bg-slate-50 p-4 text-xs sm:grid-cols-2"><div>QR CODE: <code>{{ selectedRecord.qr_code }}</code></div><div>SERIAL CODE: <code>{{ selectedRecord.serial_code }}</code></div><div>QUANTITY CODE: <code>{{ selectedRecord.quantity_code }}</code></div><div>PART NUMBER CODE: <code>{{ selectedRecord.part_number_code }}</code></div><div>SUPPLIER CODE: <code>{{ selectedRecord.supplier_code }}</code></div></div>
           </template>
           <div v-else class="p-14 text-center text-slate-500">Select a row to view its label.</div>
