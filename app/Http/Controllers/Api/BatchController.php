@@ -50,11 +50,11 @@ class BatchController extends Controller
                     'row_number' => $entry['row_number'],
                     'serial_no' => $data['serialNo'] ?? null,
                     'part_number' => $data['partNumber'] ?? null,
-                    'qr_code' => $data['qrCode'],
-                    'serial_code' => $data['serialCode'],
-                    'quantity_code' => $data['quantityCode'],
-                    'part_number_code' => $data['partNumberCode'],
-                    'supplier_code' => $data['supplierCode'],
+                    'qr_code' => $data['qrCode'] ?? '',
+                    'serial_code' => $data['serialCode'] ?? '',
+                    'quantity_code' => $data['quantityCode'] ?? '',
+                    'part_number_code' => $data['partNumberCode'] ?? '',
+                    'supplier_code' => $data['supplierCode'] ?? '',
                     'data' => $data,
                 ]);
             }
@@ -65,3 +65,4 @@ class BatchController extends Controller
         return response()->json($batch, 201);
     }
 }
+
