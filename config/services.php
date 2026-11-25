@@ -2,6 +2,10 @@
 
 return [
 
+    'ogami' => [
+        'delete_key' => env('OGAMI_DELETE_KEY'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services
@@ -36,3 +40,4 @@ return [
     ],
 
 ];
+
