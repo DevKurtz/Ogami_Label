@@ -15,6 +15,10 @@ const activePage = ref('upload');
 const labelImage = ref(null);
 const downloading = ref(false);
 const downloadError = ref('');
+const deleteEnabled = ref(false);
+const deletingId = ref(null);
+const historyMessage = ref('');
+const historyError = ref('');
 const errorLines = computed(() => error.value.split('\n').filter(Boolean));
 const errorSummary = computed(() => {
     const missing = errorLines.value.map((line) => line.match(/^Row (\d+): (.+) is blank\.$/));
@@ -62,7 +66,7 @@ async function upload() {
         file.value = null;
         batchName.value = '';
         if (fileInput.value) fileInput.value.value = '';
-        activePage.value = 'record';
+        activePage.value = 'history';
     } catch (exception) { error.value = exception.message; }
     finally { loading.value = false; }
 }
@@ -86,12 +90,58 @@ async function openBatch(id) {
     try { selectedBatch.value = await request(`/api/batches/${id}`); }
     catch (exception) { error.value = exception.message; }
 }
-function selectRecord(record) { selectedRecord.value = record; activePage.value = 'record'; }
+function selectRecord(record) { selectedRecord.value = record; }
+function requestDeleteKey() {
+    return window.prompt('Enter the workspace delete key to continue:')?.trim() || '';
+}
+async function deleteBatch(batch) {
+    if (!deleteEnabled.value || deletingId.value || !window.confirm(`Delete “${batch.name}” and all ${batch.row_count} label records? This cannot be undone.`)) return;
+    const deleteKey = requestDeleteKey();
+    if (!deleteKey) return;
+    deletingId.value = `batch-${batch.id}`;
+    historyError.value = '';
+    historyMessage.value = '';
+    try {
+        await request(`/api/batches/${batch.id}`, { method: 'DELETE', headers: { 'X-Delete-Key': deleteKey } });
+        if (selectedBatch.value?.id === batch.id) {
+            selectedBatch.value = null;
+            selectedRecord.value = null;
+        }
+        await refreshBatches();
+        historyMessage.value = `Workbook folder “${batch.name}” and its labels were deleted.`;
+    } catch (exception) { historyError.value = exception.message; }
+    finally { deletingId.value = null; }
+}
+async function deleteRecord(record) {
+    if (!deleteEnabled.value || deletingId.value || !window.confirm(`Delete the label for Row ${record.row_number}? This cannot be undone.`)) return;
+    const deleteKey = requestDeleteKey();
+    if (!deleteKey) return;
+    const batchId = selectedBatch.value?.id;
+    const previousIndex = recordIndex.value;
+    const deletingSelectedRecord = selectedRecord.value?.id === record.id;
+    deletingId.value = `record-${record.id}`;
+    historyError.value = '';
+    historyMessage.value = '';
+    try {
+        await request(`/api/records/${record.id}`, { method: 'DELETE', headers: { 'X-Delete-Key': deleteKey } });
+        if (batchId) {
+            const updatedBatch = await request(`/api/batches/${batchId}`);
+            selectedBatch.value = updatedBatch;
+            if (deletingSelectedRecord) {
+                selectedRecord.value = updatedBatch.records[Math.min(previousIndex, updatedBatch.records.length - 1)] ?? null;
+            } else {
+                selectedRecord.value = updatedBatch.records.find((item) => item.id === selectedRecord.value?.id) ?? null;
+            }
+        }
+        await refreshBatches();
+        historyMessage.value = `Row ${record.row_number} label was deleted.`;
+    } catch (exception) { historyError.value = exception.message; }
+    finally { deletingId.value = null; }
+}
 function moveRecord(step) {
     const next = records.value[recordIndex.value + step]; if (next) selectedRecord.value = next;
 }
 function labelUrl(record) { return `/api/records/${record.id}/label.svg`; }
-function codeUrl(record, key) { return `/api/records/${record.id}/label.svg#${key}`; }
 async function downloadLabel(record) {
     const image = labelImage.value;
     if (!image || downloading.value) return;
@@ -127,7 +177,10 @@ async function downloadLabel(record) {
     }
 }
 
-onMounted(async () => { try { await refreshBatches(); } catch (exception) { error.value = exception.message; } });
+onMounted(async () => {
+    try { await refreshBatches(); } catch (exception) { error.value = exception.message; }
+    try { deleteEnabled.value = (await request('/api/delete-status')).enabled; } catch { deleteEnabled.value = false; }
+});
 </script>
 
 <template>
@@ -136,14 +189,14 @@ onMounted(async () => { try { await refreshBatches(); } catch (exception) { erro
       <div class="mx-auto flex h-16 max-w-7xl items-center gap-9 px-5">
         <div class="whitespace-nowrap text-lg font-extrabold">OGAMI <span class="text-blue-600">LABEL STUDIO</span></div>
         <nav class="flex h-full gap-2">
-          <button v-for="page in ['upload','history','record']" :key="page" @click="activePage=page" class="border-b-2 px-4 capitalize" :class="activePage===page?'border-blue-600 font-bold text-blue-700':'border-transparent text-slate-500'">{{ page === 'record' ? 'Records' : page }}</button>
+          <button v-for="page in ['upload','history']" :key="page" @click="activePage=page" class="border-b-2 px-4 capitalize" :class="activePage===page?'border-blue-600 font-bold text-blue-700':'border-transparent text-slate-500'">{{ page }}</button>
         </nav>
         <span class="ml-auto text-xs text-slate-500">Public workspace</span>
       </div>
     </header>
     <main class="mx-auto max-w-7xl px-5 py-8">
       <div class="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div><h1 class="text-3xl font-bold">{{ {upload:'Upload Excel',history:'Upload history',record:'Label records'}[activePage] }}</h1><p class="mt-1 text-sm text-slate-500">Each workbook has its own folder, with one label record for every row.</p></div>
+        <div><h1 class="text-3xl font-bold">{{ {upload:'Upload Excel',history:'Upload history'}[activePage] }}</h1><p class="mt-1 text-sm text-slate-500">Each workbook has its own folder, with one label record for every row.</p></div>
         <input v-model="query" class="w-80 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="Search Excel, serial, part no…" />
       </div>
       <div v-if="error" role="alert" class="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
@@ -188,13 +241,23 @@ onMounted(async () => { try { await refreshBatches(); } catch (exception) { erro
         <article class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-lg font-bold">Flexible import, accurate labels</h2><p class="mt-3 text-sm leading-6 text-slate-600">Column names are matched automatically, including common Excel header variations. Every non-empty row generates a label, even when some details, barcode values, or QR content are missing. Missing values remain blank, and their barcode or QR image is omitted. Existing values are read directly from Excel and never guessed.</p><p class="mt-4 rounded-lg bg-slate-50 p-4 text-sm text-slate-600">Workbook rows and the original file are stored server-side. Label records are saved in the configured database.</p></article>
       </section>
 
-      <section v-if="activePage==='history' || activePage==='record'" class="grid gap-5 lg:grid-cols-[390px_1fr]">
+      <section v-if="activePage==='history'" class="space-y-4">
+        <div v-if="!deleteEnabled" class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Deleting records is locked until the workspace delete key is configured in Vercel.</div>
+        <div v-if="historyMessage" role="status" class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{{ historyMessage }}</div>
+        <div v-if="historyError" role="alert" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{{ historyError }}</div>
+        <div class="grid gap-5 lg:grid-cols-[390px_1fr]">
         <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div v-if="!visibleBatches.length" class="p-8 text-center text-sm text-slate-500">No matching uploads yet.</div>
           <div v-for="batch in visibleBatches" :key="batch.id" class="mb-3 overflow-hidden rounded-xl border border-slate-200">
-            <button @click="openBatch(batch.id)" class="flex w-full items-center justify-between bg-slate-50 p-4 text-left"><span><b>📁 {{ batch.name }}</b><small class="mt-1 block text-slate-500">{{ batch.row_count }} rows · {{ batch.original_filename }}</small></span><span>›</span></button>
+            <div class="flex items-center gap-2 bg-slate-50 p-2">
+              <button @click="openBatch(batch.id)" class="flex min-w-0 flex-1 items-center justify-between p-2 text-left"><span class="min-w-0"><b class="block truncate">📁 {{ batch.name }}</b><small class="mt-1 block truncate text-slate-500">{{ batch.row_count }} rows · {{ batch.original_filename }}</small></span><span>›</span></button>
+              <button @click="deleteBatch(batch)" :disabled="!deleteEnabled||deletingId!==null" class="shrink-0 rounded-lg px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40" :title="deleteEnabled ? 'Delete this workbook folder and all its labels' : 'Configure the workspace delete key to enable deletion'">{{ deletingId===`batch-${batch.id}` ? 'Deleting…' : 'Delete folder' }}</button>
+            </div>
             <div v-if="selectedBatch?.id===batch.id" class="max-h-[60vh] overflow-auto p-2">
-              <button v-for="record in records" :key="record.id" @click="selectRecord(record)" class="flex w-full items-center justify-between border-b border-slate-100 px-3 py-3 text-left hover:bg-blue-50" :class="selectedRecord?.id===record.id?'bg-blue-50':''"><span><b>Row {{ record.row_number }}</b><small class="mt-1 block text-slate-500">{{ record.serial_no }} · {{ record.part_number }}</small></span><span class="text-xs text-blue-600">Open label ›</span></button>
+              <div v-for="record in records" :key="record.id" class="flex items-center gap-1 border-b border-slate-100 hover:bg-blue-50" :class="selectedRecord?.id===record.id?'bg-blue-50':''">
+                <button @click="selectRecord(record)" class="flex min-w-0 flex-1 items-center justify-between px-3 py-3 text-left"><span class="min-w-0"><b>Row {{ record.row_number }}</b><small class="mt-1 block truncate text-slate-500">{{ record.serial_no }} · {{ record.part_number }}</small></span><span class="text-xs text-blue-600">Open label ›</span></button>
+                <button @click="deleteRecord(record)" :disabled="!deleteEnabled||deletingId!==null" class="shrink-0 rounded-lg px-2 py-2 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40" :title="deleteEnabled ? 'Delete this label record' : 'Configure the workspace delete key to enable deletion'">{{ deletingId===`record-${record.id}` ? 'Deleting…' : 'Delete' }}</button>
+              </div>
             </div>
           </div>
         </article>
@@ -208,6 +271,7 @@ onMounted(async () => { try { await refreshBatches(); } catch (exception) { erro
           </template>
           <div v-else class="p-14 text-center text-slate-500">Select a row to view its label.</div>
         </article>
+        </div>
       </section>
     </main>
   </div>
