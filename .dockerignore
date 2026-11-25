@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+.git
+.vercel
+.docker-config
+.composer-cache
+.npm-cache
+node_modules
+vendor
+legacy-prototype
+database/database.sqlite
+storage/logs/*.log
+public/hot
+public/storage
+public/build

@@ -1,0 +1,22 @@
+FROM node:24-alpine AS assets
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+
+FROM dunglas/frankenphp:1-php8.3
+RUN install-php-extensions pdo_pgsql zip gd
+RUN printf 'upload_max_filesize=4M\npost_max_size=4M\nmemory_limit=512M\nmax_execution_time=60\n' > /usr/local/etc/php/conf.d/ogami.ini
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+WORKDIR /app
+COPY . .
+RUN composer install --no-dev --no-interaction --no-progress --prefer-dist --optimize-autoloader \
+    && mkdir -p /tmp/ogami-storage/framework/cache /tmp/ogami-storage/framework/sessions /tmp/ogami-storage/framework/views \
+    && chmod -R 777 /tmp/ogami-storage
+COPY --from=assets /app/public/build /app/public/build
+COPY Caddyfile.vercel /etc/caddy/Caddyfile
+
+ENV APP_ENV=production APP_DEBUG=false LOG_CHANNEL=stderr LOG_LEVEL=info LARAVEL_STORAGE_PATH=/tmp/ogami-storage
+EXPOSE 8080
+CMD ["frankenphp", "run", "--config", "/etc/caddy/Caddyfile"]
