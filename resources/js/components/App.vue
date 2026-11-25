@@ -13,6 +13,20 @@ const error = ref('');
 const success = ref(null);
 const activePage = ref('upload');
 const errorLines = computed(() => error.value.split('\n').filter(Boolean));
+const errorSummary = computed(() => {
+    const missing = errorLines.value.map((line) => line.match(/^Row (\d+): (.+) is blank\.$/));
+    if (missing.length > 1 && missing.every(Boolean)) {
+        const fields = [...new Set(missing.map((match) => match[2]))];
+        if (fields.length === 1) {
+            const field = fields[0];
+            const column = field === 'manufacturing date' ? 'MFG. DATE' : field;
+            return `${missing.length} rows are missing ${field}. Fill in the “${column}” column for those rows, then upload again.`;
+        }
+    }
+    return errorLines.value.length > 1
+        ? `${errorLines.value.length} validation issues found. Review the details before uploading again.`
+        : (errorLines.value[0] ?? 'Please review the workbook and try again.');
+});
 
 const visibleBatches = computed(() => batches.value.filter((batch) => {
     const term = query.value.trim().toLowerCase();
@@ -96,13 +110,15 @@ onMounted(async () => { try { await refreshBatches(); } catch (exception) { erro
         <input v-model="query" class="w-80 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="Search Excel, serial, part no…" />
       </div>
       <div v-if="error" role="alert" class="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-        <b class="block">We couldn't upload this Excel file</b>
-        <p class="mt-1">{{ errorLines.length > 1 ? `${errorLines.length} issues found. Review the details below.` : 'Please review the issue below and try again.' }}</p>
-        <ul v-if="errorLines.length > 1" class="mt-3 max-h-36 space-y-1 overflow-y-auto rounded-lg border border-red-200/80 bg-white/70 p-3 text-xs sm:text-sm">
-          <li v-for="(line, index) in errorLines" :key="index">{{ line }}</li>
-        </ul>
-        <p v-else class="mt-1">{{ error }}</p>
-        <p class="mt-2 text-red-700">No records were saved. Correct the listed rows or columns, then try again.</p>
+        <b class="block">Upload needs a correction</b>
+        <p class="mt-1">{{ errorSummary }}</p>
+        <details v-if="errorLines.length > 1" class="mt-2">
+          <summary class="w-fit cursor-pointer font-medium text-red-900 underline underline-offset-2">Show {{ errorLines.length }} affected rows</summary>
+          <ul class="mt-2 max-h-36 space-y-1 overflow-y-auto rounded-lg border border-red-200/80 bg-white/70 p-3 text-xs sm:text-sm">
+            <li v-for="(line, index) in errorLines" :key="index">{{ line }}</li>
+          </ul>
+        </details>
+        <p class="mt-2 text-red-700">No records were saved. Your selected file is still here; correct the workbook and upload it again.</p>
       </div>
       <div v-if="success" role="status" class="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
         <div><b class="block">Upload complete and saved</b><span>{{ success.filename }} · {{ success.count }} row labels · folder “{{ success.name }}”</span></div>
