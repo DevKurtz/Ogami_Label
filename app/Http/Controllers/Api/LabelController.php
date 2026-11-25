@@ -60,6 +60,11 @@ class LabelController extends Controller
         $svg[] = $text(480,429,'MADE IN PHILIPPINE'); $svg[] = $text(615,481,'PHILIPPINES OGAMI',17,'middle'); $svg[] = $text(615,506,'CORPORATION',17,'middle');
         $svg[] = '</svg>';
 
-        return response(implode('', $svg), 200, ['Content-Type' => 'image/svg+xml; charset=utf-8', 'Cache-Control' => 'private, max-age=300']);
+        return response(implode('', $svg), 200, [
+            'Content-Type' => 'image/svg+xml; charset=utf-8',
+            'Cache-Control' => 'private, no-store, no-cache, must-revalidate',
+            'Pragma' => 'no-cache',
+        ]);
     }
 }
+
