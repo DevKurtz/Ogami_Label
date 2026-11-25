@@ -75,8 +75,8 @@ class LabelController extends Controller
 
         return response(implode('', $svg), 200, [
             'Content-Type' => 'image/svg+xml; charset=utf-8',
-            'Cache-Control' => 'private, no-store, no-cache, must-revalidate',
-            'Pragma' => 'no-cache',
+            // A record has an immutable id, so the generated vector can be reused safely by this user's browser.
+            'Cache-Control' => 'private, max-age=86400, immutable',
         ]);
     }
 }
