@@ -68,19 +68,10 @@ class WorkbookImporter
             }
         }
 
-        // Descriptive fields may be absent or blank. Encoded values must come from Excel as-is.
-        $required = ['partNumber', 'quantity', 'serialNo', 'serialCode', 'quantityCode', 'partNumberCode', 'supplierCode', 'qrCode'];
-        $missing = array_values(array_diff($required, array_keys($indices)));
-        if ($missing) {
-            throw new RuntimeException('Missing required Excel columns: '.implode(', ', array_map(fn ($field) => self::FIELD_LABELS[$field] ?? $field, $missing)).'.');
-        }
-
         $rows = [];
-        $serials = [];
-        $uniqueCodes = ['serialCode' => [], 'qrCode' => []];
         $errors = [];
         for ($rowNumber = 2; $rowNumber <= $lastRow; $rowNumber++) {
-            $row = [];
+            $row = array_fill_keys(array_keys(self::FIELDS), '');
             foreach ($indices as $key => $column) {
                 $cell = $sheet->getCell([$column, $rowNumber]);
                 $value = $cell->getFormattedValue();
@@ -101,28 +92,6 @@ class WorkbookImporter
                 continue;
             }
 
-            foreach (['partNumber', 'quantity', 'serialNo', 'serialCode', 'quantityCode', 'partNumberCode', 'supplierCode', 'qrCode'] as $requiredField) {
-                if (($row[$requiredField] ?? '') === '') {
-                    $errors[] = 'Row '.$rowNumber.': '.(self::FIELD_LABELS[$requiredField] ?? $requiredField).' is blank.';
-                }
-            }
-            foreach (['serialCode', 'quantityCode', 'partNumberCode', 'supplierCode'] as $codeField) {
-                if (strlen($row[$codeField] ?? '') > 255 || preg_match('/[^\x20-\x7E]/', $row[$codeField] ?? '')) {
-                    $errors[] = 'Row '.$rowNumber.': '.(self::FIELD_LABELS[$codeField] ?? $codeField).' cannot be encoded as Code 128.';
-                }
-            }
-            $serial = $row['serialNo'] ?? '';
-            if ($serial !== '' && isset($serials[$serial])) {
-                $errors[] = "Rows {$serials[$serial]} and {$rowNumber}: duplicate serial no. {$serial}.";
-            }
-            if ($serial !== '') $serials[$serial] = $rowNumber;
-            foreach (['serialCode', 'qrCode'] as $uniqueField) {
-                $value = $row[$uniqueField] ?? '';
-                if ($value !== '' && isset($uniqueCodes[$uniqueField][$value])) {
-                    $errors[] = 'Rows '.$uniqueCodes[$uniqueField][$value].' and '.$rowNumber.': duplicate '.(self::FIELD_LABELS[$uniqueField] ?? $uniqueField).'.';
-                }
-                if ($value !== '') $uniqueCodes[$uniqueField][$value] = $rowNumber;
-            }
             $rows[] = ['row_number' => $rowNumber, 'data' => $row];
         }
 
