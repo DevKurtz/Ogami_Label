@@ -30,14 +30,14 @@ class WorkbookImporter
 
     private const FIELDS = [
         'serialNumber' => ['SERIAL NUMBER'],
-        'partNumber' => ['PART NUMBER①', 'PART NUMBER1', 'PART NUMBER 1'],
-        'supplierPn' => ['PART NUMBER②', 'PART NUMBER2', 'PART NUMBER 2'],
-        'partName' => ['PART NAME'],
-        'quantity' => ['QUANTITY'],
-        'modelName' => ['MODEL NAME'],
-        'cartonWeight' => ['CARTON WEIGHT'],
-        'supplierNumber' => ['SUPPLIER NUMBER'],
-        'mfgDate' => ['MFG. DATE', 'MFG DATE'],
+        'partNumber' => ['PART NUMBER①', 'PART NUMBER1', 'PART NUMBER 1', 'PART NO.', 'PART NO'],
+        'supplierPn' => ['PART NUMBER②', 'PART NUMBER2', 'PART NUMBER 2', 'SUPPLIER PART NUMBER', 'SUPPLIER PN'],
+        'partName' => ['PART NAME', 'PARTS DESCRIPTION', 'DESCRIPTION'],
+        'quantity' => ['QUANTITY', 'QTY'],
+        'modelName' => ['MODEL NAME', 'MODEL'],
+        'cartonWeight' => ['CARTON WEIGHT', 'CARTON WEIGHT (KG)', 'WEIGHT'],
+        'supplierNumber' => ['SUPPLIER NUMBER', 'SUPPLIER NO.', 'VENDOR NUMBER'],
+        'mfgDate' => ['MFG. DATE', 'MFG DATE', 'MANUFACTURING DATE'],
         'serialNo' => ['SERIAL NO.', 'SERIAL NO'],
         'dateCode' => ['DATECODE', 'DATE CODE'],
         'serialCode' => ['SERIAL CODE'],
@@ -68,7 +68,8 @@ class WorkbookImporter
             }
         }
 
-        $required = ['partNumber', 'partName', 'quantity', 'cartonWeight', 'modelName', 'supplierNumber', 'mfgDate', 'serialNo', 'serialCode', 'quantityCode', 'partNumberCode', 'supplierCode', 'qrCode'];
+        // Descriptive fields may be absent or blank. Encoded values must come from Excel as-is.
+        $required = ['partNumber', 'quantity', 'serialNo', 'serialCode', 'quantityCode', 'partNumberCode', 'supplierCode', 'qrCode'];
         $missing = array_values(array_diff($required, array_keys($indices)));
         if ($missing) {
             throw new RuntimeException('Missing required Excel columns: '.implode(', ', array_map(fn ($field) => self::FIELD_LABELS[$field] ?? $field, $missing)).'.');
@@ -99,7 +100,7 @@ class WorkbookImporter
                 continue;
             }
 
-            foreach (['partNumber', 'partName', 'quantity', 'cartonWeight', 'modelName', 'supplierNumber', 'mfgDate', 'serialNo', 'serialCode', 'quantityCode', 'partNumberCode', 'supplierCode', 'qrCode'] as $requiredField) {
+            foreach (['partNumber', 'quantity', 'serialNo', 'serialCode', 'quantityCode', 'partNumberCode', 'supplierCode', 'qrCode'] as $requiredField) {
                 if (($row[$requiredField] ?? '') === '') {
                     $errors[] = 'Row '.$rowNumber.': '.(self::FIELD_LABELS[$requiredField] ?? $requiredField).' is blank.';
                 }
