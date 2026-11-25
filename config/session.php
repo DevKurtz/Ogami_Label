@@ -1,7 +1,5 @@
 <?php
 
-use Illuminate\Support\Str;
-
 return [
 
     /*
@@ -129,7 +127,7 @@ return [
 
     'cookie' => env(
         'SESSION_COOKIE',
-        Str::slug((string) env('APP_NAME', 'laravel')).'-session'
+        'ogami-label-session'
     ),
 
     /*
@@ -215,3 +213,4 @@ return [
     'partitioned' => env('SESSION_PARTITIONED_COOKIE', false),
 
 ];
+
