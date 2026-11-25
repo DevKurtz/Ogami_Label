@@ -6,6 +6,7 @@ require __DIR__.'/../vendor/autoload.php';
 
 $app = require __DIR__.'/../bootstrap/app.php';
 $kernel = $app->make(ConsoleKernel::class);
+$kernel->bootstrap();
 $database = $app->make('db')->connection();
 $migrationLockId = 73190426011;
 
