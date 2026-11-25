@@ -9,6 +9,25 @@ use RuntimeException;
 
 class WorkbookImporter
 {
+    private const FIELD_LABELS = [
+        'serialNumber' => 'serial number',
+        'partNumber' => 'part number',
+        'supplierPn' => 'supplier part number',
+        'partName' => 'part name',
+        'quantity' => 'quantity',
+        'modelName' => 'model name',
+        'cartonWeight' => 'carton weight',
+        'supplierNumber' => 'supplier number',
+        'mfgDate' => 'manufacturing date',
+        'serialNo' => 'serial number',
+        'dateCode' => 'date code',
+        'serialCode' => 'serial code',
+        'quantityCode' => 'quantity code',
+        'partNumberCode' => 'part number code',
+        'supplierCode' => 'supplier code',
+        'qrCode' => 'QR code',
+    ];
+
     private const FIELDS = [
         'serialNumber' => ['SERIAL NUMBER'],
         'partNumber' => ['PART NUMBER①', 'PART NUMBER1', 'PART NUMBER 1'],
@@ -52,7 +71,7 @@ class WorkbookImporter
         $required = ['partNumber', 'partName', 'quantity', 'cartonWeight', 'modelName', 'supplierNumber', 'mfgDate', 'serialNo', 'serialCode', 'quantityCode', 'partNumberCode', 'supplierCode', 'qrCode'];
         $missing = array_values(array_diff($required, array_keys($indices)));
         if ($missing) {
-            throw new RuntimeException('Missing required Excel columns: '.implode(', ', $missing));
+            throw new RuntimeException('Missing required Excel columns: '.implode(', ', array_map(fn ($field) => self::FIELD_LABELS[$field] ?? $field, $missing)).'.');
         }
 
         $rows = [];
@@ -67,7 +86,8 @@ class WorkbookImporter
                     && $cell->getDataType() === \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC) {
                     $numericDigits = preg_replace('/\D/', '', sprintf('%.0f', (float) $cell->getValue())) ?? '';
                     if (strlen(ltrim($numericDigits, '0')) > 15) {
-                        $errors[] = "Row {$rowNumber}: {$key} is stored as a number with more than 15 significant digits. Re-enter this code as Excel text to prevent precision loss.";
+                        $fieldLabel = self::FIELD_LABELS[$key] ?? $key;
+                        $errors[] = "Row {$rowNumber}: {$fieldLabel} is stored as a number with more than 15 significant digits. Re-enter it as Excel text to prevent precision loss.";
                     }
                 }
                 if ($key === 'mfgDate') {
@@ -81,12 +101,12 @@ class WorkbookImporter
 
             foreach (['partNumber', 'partName', 'quantity', 'cartonWeight', 'modelName', 'supplierNumber', 'mfgDate', 'serialNo', 'serialCode', 'quantityCode', 'partNumberCode', 'supplierCode', 'qrCode'] as $requiredField) {
                 if (($row[$requiredField] ?? '') === '') {
-                    $errors[] = "Row {$rowNumber}: {$requiredField} is blank.";
+                    $errors[] = 'Row '.$rowNumber.': '.(self::FIELD_LABELS[$requiredField] ?? $requiredField).' is blank.';
                 }
             }
             foreach (['serialCode', 'quantityCode', 'partNumberCode', 'supplierCode'] as $codeField) {
                 if (strlen($row[$codeField] ?? '') > 255 || preg_match('/[^\x20-\x7E]/', $row[$codeField] ?? '')) {
-                    $errors[] = "Row {$rowNumber}: {$codeField} cannot be encoded as Code 128.";
+                    $errors[] = 'Row '.$rowNumber.': '.(self::FIELD_LABELS[$codeField] ?? $codeField).' cannot be encoded as Code 128.';
                 }
             }
             $serial = $row['serialNo'] ?? '';
