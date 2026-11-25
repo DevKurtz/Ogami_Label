@@ -98,7 +98,7 @@ class WorkbookImporter
         }
 
         if (!$rows) throw new RuntimeException('No data rows were found in the first worksheet.');
-        if ($errors) throw new RuntimeException(implode(' ', array_slice($errors, 0, 12)));
+        if ($errors) throw new RuntimeException(implode("\n", array_slice($errors, 0, 12)));
 
         return ['headers' => $headers, 'rows' => $rows];
     }
@@ -117,3 +117,4 @@ class WorkbookImporter
         return $value;
     }
 }
+
