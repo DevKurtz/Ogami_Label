@@ -77,6 +77,7 @@ class WorkbookImporter
 
         $rows = [];
         $serials = [];
+        $uniqueCodes = ['serialCode' => [], 'qrCode' => []];
         $errors = [];
         for ($rowNumber = 2; $rowNumber <= $lastRow; $rowNumber++) {
             $row = [];
@@ -115,6 +116,13 @@ class WorkbookImporter
                 $errors[] = "Rows {$serials[$serial]} and {$rowNumber}: duplicate serial no. {$serial}.";
             }
             if ($serial !== '') $serials[$serial] = $rowNumber;
+            foreach (['serialCode', 'qrCode'] as $uniqueField) {
+                $value = $row[$uniqueField] ?? '';
+                if ($value !== '' && isset($uniqueCodes[$uniqueField][$value])) {
+                    $errors[] = 'Rows '.$uniqueCodes[$uniqueField][$value].' and '.$rowNumber.': duplicate '.(self::FIELD_LABELS[$uniqueField] ?? $uniqueField).'.';
+                }
+                if ($value !== '') $uniqueCodes[$uniqueField][$value] = $rowNumber;
+            }
             $rows[] = ['row_number' => $rowNumber, 'data' => $row];
         }
 
