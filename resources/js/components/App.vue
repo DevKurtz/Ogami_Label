@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
 import QRCode from 'qrcode';
@@ -54,6 +54,7 @@ const selectedTableIds = ref([]);
 const codeTypes = ref({});
 const editorOpen = ref(false);
 const templateElements = ref([]);
+const editingTextId = ref(null);
 const canvasElement = ref(null);
 const qrPreviews = ref({});
 const templateSaving = ref(false);
@@ -216,9 +217,53 @@ function toggleBatch(id) {
     openBatch(id);
 }
 function selectRecord(record) { selectedRecord.value = record; }
+function makeLegacyTemplate() {
+    let index = 0;
+    const elements = [];
+    const add = (type, field, label, x, y, w, h, fontSize = 18) => elements.push({ id: `legacy-${++index}`, type, field, label, x, y, w, h, fontSize });
+    const box = (x, y, w, h) => add('box', '', '', x, y, w, h);
+    const text = (field, label, x, y, w, h, fontSize = 18) => add('text', field, label, x, y, w, h, fontSize);
+    const barcode = (field, x, y, w, h) => add('barcode', field, '', x, y, w, h);
+
+    [[0,0,535,150],[535,0,225,150],[0,150,265,140],[265,150,270,70],[535,150,225,70],[265,220,270,70],[535,220,225,70],[0,290,265,115],[265,290,270,115],[535,290,225,115],[0,405,470,130],[470,405,290,130]].forEach((cell) => box(...cell));
+    text('', 'PART NO.', 8, 11, 150, 22, 16); text('', '(P)', 8, 31, 60, 22, 15); text('partNumber', '', 185, 20, 335, 52, 40);
+    barcode('partNumberCode', 110, 83, 420, 50); text('partNumberCode', '', 110, 136, 420, 13, 10); add('qr', 'qrCode', '', 600, 8, 145, 135);
+    text('', 'QUANTITY', 8, 154, 180, 22, 16); text('', '(Q)', 8, 177, 60, 22, 15); text('quantity', '', 40, 180, 190, 49, 34);
+    barcode('quantityCode', 38, 240, 188, 31); text('quantityCode', '', 38, 270, 188, 12, 9);
+    text('', 'PARTS DESCRIPTION', 275, 154, 245, 22, 15); text('partName', '', 280, 180, 250, 35, 17);
+    text('', 'MODEL NAME', 545, 154, 205, 22, 15); text('modelName', '', 550, 180, 195, 35, 18);
+    text('', 'CARTON WEIGHT (Kg)', 275, 224, 250, 22, 15); text('cartonWeight', '', 280, 250, 250, 35, 19);
+    text('', 'COMPONENT S/N', 545, 224, 205, 22, 15);
+    text('', 'SUPPLIER NUMBER (V)', 8, 294, 245, 22, 15); text('supplierNumber', '', 35, 319, 220, 34, 19);
+    barcode('supplierCode', 45, 354, 180, 36); text('supplierCode', '', 45, 390, 180, 12, 9);
+    text('', 'MFG DATE', 275, 294, 245, 22, 15); text('mfgDate', '', 285, 328, 250, 38, 21);
+    text('', 'SUPPLIER PN (2P)', 545, 294, 205, 22, 15); text('supplierPn', '', 550, 328, 195, 38, 19);
+    text('', 'SERIAL NO.', 8, 410, 180, 22, 15); text('', '(S)', 8, 438, 45, 22, 15); text('serialNo', '', 55, 435, 390, 32, 21);
+    barcode('serialCode', 25, 474, 405, 45); text('serialCode', '', 25, 515, 405, 12, 9);
+    text('', 'MADE IN PHILIPPINE', 480, 410, 270, 22, 15); text('', 'PHILIPPINES OGAMI', 485, 458, 260, 30, 16); text('', 'CORPORATION', 485, 485, 260, 30, 16);
+    return elements;
+}
+function beginInlineTextEdit(event, element) {
+    if (element.field) return;
+    editingTextId.value = element.id;
+    nextTick(() => {
+        const editor = canvasElement.value?.querySelector(`[data-text-widget="${element.id}"]`);
+        if (!editor) return;
+        editor.focus();
+        const selection = window.getSelection();
+        const range = document.createRange();
+        range.selectNodeContents(editor);
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+    });
+}
+function updateInlineText(event, element) { element.label = event.currentTarget.textContent ?? ''; }
+function finishInlineTextEdit() { editingTextId.value = null; }
 function openEditor() {
     draftDesignMode.value = false;
-    templateElements.value = structuredClone(selectedBatch.value?.label_template?.elements ?? []);
+    const savedElements = selectedBatch.value?.label_template?.elements;
+    templateElements.value = structuredClone(Array.isArray(savedElements) && savedElements.length ? savedElements : makeLegacyTemplate());
+    editingTextId.value = null;
     templateMessage.value = ''; templateError.value = ''; editorOpen.value = true;
 }
 function startDesign() {
@@ -527,7 +572,7 @@ onBeforeUnmount(endCanvasInteraction);
       </section>
     </main>
     <div v-if="editorOpen" class="fixed inset-0 z-40 flex flex-col bg-slate-100" role="dialog" aria-modal="true" aria-label="Label design editor">
-      <header class="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-5 py-3"><div class="mr-auto"><b class="text-lg">{{ draftDesignMode ? `Design ${designTableIndex + 1} of ${designTables.length} · ${designTable?.sheetName} / ${designTable?.tableName}` : 'Label design editor' }}</b><p class="text-xs text-slate-500">{{ draftDesignMode ? 'Start with a blank canvas. Add and arrange the fields, barcodes, QR codes, and borders you want.' : 'Drag a field onto the canvas. Select an item to change its field, size, or remove it.' }}</p></div><span v-if="templateMessage" class="text-sm text-emerald-700">{{ templateMessage }}</span><span v-if="templateError" class="text-sm text-red-700">{{ templateError }}</span><button @click="saveTemplate" :disabled="templateSaving" class="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50">{{ templateSaving ? 'Saving…' : (draftDesignMode ? (designTableIndex + 1 < designTables.length ? 'Save design & next table' : 'Create records') : 'Save design') }}</button><button @click="editorOpen=false; draftDesignMode=false" class="rounded-lg border border-slate-300 px-4 py-2">{{ draftDesignMode ? 'Cancel' : 'Close' }}</button></header>
+      <header class="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-5 py-3"><div class="mr-auto"><b class="text-lg">{{ draftDesignMode ? `Design ${designTableIndex + 1} of ${designTables.length} · ${designTable?.sheetName} / ${designTable?.tableName}` : 'Label design editor' }}</b><p class="text-xs text-slate-500">{{ draftDesignMode ? 'Start with a blank canvas. Add and arrange the fields, barcodes, QR codes, and borders you want.' : 'Double-click static text on the canvas to edit it. Drag items to move or resize them.' }}</p></div><span v-if="templateMessage" class="text-sm text-emerald-700">{{ templateMessage }}</span><span v-if="templateError" class="text-sm text-red-700">{{ templateError }}</span><button @click="saveTemplate" :disabled="templateSaving" class="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50">{{ templateSaving ? 'Saving…' : (draftDesignMode ? (designTableIndex + 1 < designTables.length ? 'Save design & next table' : 'Create records') : 'Save design') }}</button><button @click="editorOpen=false; draftDesignMode=false" class="rounded-lg border border-slate-300 px-4 py-2">{{ draftDesignMode ? 'Cancel' : 'Close' }}</button></header>
       <div class="grid min-h-0 flex-1 lg:grid-cols-[270px_minmax(0,1fr)_300px]">
         <aside class="overflow-auto border-r border-slate-200 bg-white p-4">
           <h3 class="mb-2 font-bold">Fields</h3>
@@ -548,7 +593,8 @@ onBeforeUnmount(endCanvasInteraction);
               <span v-if="element.type==='box'" class="pointer-events-none block h-full w-full border border-slate-800"></span>
               <span v-else-if="element.type==='qr'" class="flex h-full w-full items-center justify-center bg-white p-1"><img v-if="qrPreviews[element.id]" :src="qrPreviews[element.id]" class="pointer-events-none block h-full w-full object-contain" alt="Scannable QR code preview"><span v-else class="px-2 text-center text-xs text-slate-500">{{ elementValue(element) ? 'QR preview unavailable for this value' : 'No value in the preview row' }}</span></span>
               <span v-else-if="element.type==='barcode'" class="pointer-events-none grid h-full place-items-center bg-white text-3xl tracking-widest">▥ ▥ ▥</span>
-              <span v-else class="pointer-events-none block truncate">{{ element.label || elementValue(element) || (element.field ? `[${element.field}]` : 'Text') }}</span>
+              <span v-else-if="element.field" class="pointer-events-none block truncate">{{ elementValue(element) || `[${element.field}]` }}</span>
+              <span v-else :data-text-widget="element.id" :contenteditable="editingTextId===element.id" @pointerdown="editingTextId===element.id && $event.stopPropagation()" @dblclick.stop="beginInlineTextEdit($event,element)" @input="updateInlineText($event,element)" @blur="finishInlineTextEdit" @keydown.enter.prevent="finishInlineTextEdit" class="block min-h-5 cursor-text whitespace-pre-wrap break-words outline-none">{{ element.label || 'Double-click to edit' }}</span>
               <button type="button" title="Drag to resize" aria-label="Resize design element" class="absolute bottom-0 right-0 h-4 w-4 touch-none cursor-nwse-resize border-l border-t border-blue-600 bg-white" @pointerdown.stop="beginCanvasInteraction($event,element,'resize')" @click.stop></button>
             </div>
           </div>
@@ -562,7 +608,6 @@ onBeforeUnmount(endCanvasInteraction);
               <small v-if="element.type==='qr'" class="mb-2 block text-xs text-slate-500">QR image encodes the value from the selected Excel column.</small>
               <small v-else-if="element.type==='text'&&element.field" class="mb-2 block text-xs text-slate-500">Prints the value as readable text.</small>
               <select v-if="(element.type==='qr'||element.type==='barcode'||(element.type==='text'&&element.field))" v-model="element.field" class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"><option v-for="[field,label] in availableFields" :key="field" :value="field">{{ label }}</option></select>
-              <input v-if="element.type==='text'" v-model="element.label" placeholder="Optional label" class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs">
               <div class="grid grid-cols-2 gap-2"><label v-for="key in ['x','y','w','h']" :key="key" class="text-xs capitalize text-slate-500">{{ key }}<input v-model.number="element[key]" type="number" min="0" :max="key==='w'?760-element.x:key==='h'?535-element.y:key==='x'?760-element.w:535-element.h" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label></div>
               <label v-if="element.type==='text'" class="mt-2 block text-xs text-slate-500">Font size<input v-model.number="element.fontSize" type="number" min="8" max="64" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label>
             </div>
