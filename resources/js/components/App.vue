@@ -47,6 +47,7 @@ const downloading = ref(false);
 const pdfDownloading = ref(false);
 const pdfProgress = ref({ current: 0, total: 0 });
 const pdfBatchId = ref(null);
+const pdfStage = ref('Loading labels');
 const downloadError = ref('');
 const deleteEnabled = ref(false);
 const userName = document.querySelector('meta[name="user-name"]')?.content ?? '';
@@ -469,40 +470,40 @@ async function downloadLabel(record) {
 
 async function rasterizeLabelForPdf(record, width = 2300) {
     const image = new Image();
+    image.decoding = 'async';
     image.src = labelUrl(record);
-    if (typeof image.decode === 'function') await image.decode();
-    else if (!image.complete) await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; });
+    const loadImage = typeof image.decode === 'function'
+        ? image.decode()
+        : new Promise((resolve, reject) => {
+            if (image.complete && image.naturalWidth > 0) return resolve();
+            image.onload = resolve;
+            image.onerror = () => reject(new Error(`The label image for Row ${record.row_number} could not be loaded.`));
+        });
+    let imageTimeout;
+    try {
+        await Promise.race([
+            loadImage,
+            new Promise((_, reject) => { imageTimeout = window.setTimeout(() => reject(new Error(`Loading Row ${record.row_number} took too long. Please refresh History and retry.`)), 20000); }),
+        ]);
+    } finally { window.clearTimeout(imageTimeout); }
 
     const height = Math.round(width * 535 / 760);
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
-    const context = canvas.getContext('2d', { willReadFrequently: true });
+    const context = canvas.getContext('2d');
     if (!context) throw new Error('This browser could not prepare a label image for the PDF.');
     context.fillStyle = '#fff';
     context.fillRect(0, 0, width, height);
     context.drawImage(image, 0, 0, width, height);
-
-    // Embed lossless RGB pixels so fine barcode and QR edges remain crisp when printed.
-    const rgba = context.getImageData(0, 0, width, height).data;
-    const rowLength = width * 3;
-    const filtered = new Uint8Array((rowLength + 1) * height);
-    for (let y = 0; y < height; y++) {
-        const target = y * (rowLength + 1) + 1;
-        for (let x = 0; x < width; x++) {
-            const source = (y * width + x) * 4;
-            const destination = target + x * 3;
-            filtered[destination] = rgba[source];
-            filtered[destination + 1] = rgba[source + 1];
-            filtered[destination + 2] = rgba[source + 2];
-        }
-    }
-    if (!('CompressionStream' in window)) throw new Error('PDF image compression is not supported in this browser. Please use a recent version of Chrome, Edge, or Firefox.');
-    const compressor = new CompressionStream('deflate');
-    const writer = compressor.writable.getWriter();
-    await writer.write(filtered);
-    await writer.close();
-    return { width, height, bytes: new Uint8Array(await new Response(compressor.readable).arrayBuffer()) };
+    // Let the browser's native encoder compress the 337-DPI label instead of copying
+    // millions of pixels through JavaScript and deflating them by hand.
+    const jpeg = await new Promise((resolve, reject) => canvas.toBlob(
+        (blob) => blob ? resolve(blob) : reject(new Error('The browser could not encode a label image for the PDF.')),
+        'image/jpeg',
+        1,
+    ));
+    return { width, height, bytes: new Uint8Array(await jpeg.arrayBuffer()), jpeg: true };
 }
 
 function buildTwoUpPdf(images) {
@@ -528,7 +529,7 @@ function buildTwoUpPdf(images) {
         const imageIds = [pageId + 2, pageId + 3];
         const firstIndex = page * 2;
         const pageImages = images.slice(firstIndex, firstIndex + 2);
-        const blankImage = { width: 1, height: 1, bytes: new Uint8Array([120, 156, 99, 248, 255, 255, 63, 0, 5, 254, 2, 254]) };
+        const blankImage = { width: 1, height: 1, bytes: new Uint8Array([120, 156, 99, 248, 255, 255, 63, 0, 5, 254, 2, 254]), jpeg: false };
         const xobjects = pageImages.map((_, index) => `/Im${index + 1} ${imageIds[index]} 0 R`).join(' ');
         setObject(pageId, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << ${xobjects} >> >> /Contents ${contentId} 0 R >>`);
         const commands = pageImages.map((_, index) => {
@@ -538,8 +539,11 @@ function buildTwoUpPdf(images) {
         const content = ascii(commands);
         setObject(contentId, concatBytes([ascii(`<< /Length ${content.length} >>\nstream\n`), content, ascii('\nendstream')]));
         [pageImages[0], pageImages[1] ?? blankImage].forEach((image, index) => {
+            const encoding = image.jpeg
+                ? '/Filter /DCTDecode'
+                : '/Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns ' + image.width + ' >>';
             setObject(imageIds[index], concatBytes([
-                ascii(`<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns ${image.width} >> /Length ${image.bytes.length} >>\nstream\n`),
+                ascii(`<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 ${encoding} /Length ${image.bytes.length} >>\nstream\n`),
                 image.bytes,
                 ascii('\nendstream'),
             ]));
@@ -585,11 +589,15 @@ async function downloadBatchPdf(batch = selectedBatch.value) {
         pdfProgress.value = { current: 0, total: batchRecords.length };
         const images = [];
         for (const record of batchRecords) {
-            images.push(await rasterizeLabelForPdf(record));
+            pdfStage.value = 'Loading labels';
+            try { images.push(await rasterizeLabelForPdf(record)); }
+            catch (exception) { throw new Error(`PDF stopped at Row ${record.row_number}: ${exception.message}`); }
             pdfProgress.value = { current: images.length, total: batchRecords.length };
-            // Yield so the progress indicator stays responsive during large workbooks.
-            await new Promise((resolve) => window.setTimeout(resolve, 0));
+            // Give the browser a paint opportunity so the per-row progress is visible.
+            await new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
         }
+        pdfStage.value = 'Building PDF';
+        await new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
         const pdf = buildTwoUpPdf(images);
         const url = URL.createObjectURL(pdf);
         const link = document.createElement('a');
@@ -700,7 +708,7 @@ onBeforeUnmount(endCanvasInteraction);
           <div v-for="batch in visibleBatches" :key="batch.id" class="mb-3 overflow-hidden rounded-xl border border-slate-200">
             <div class="flex flex-wrap items-center gap-2 bg-slate-50 p-2">
               <button @click="toggleBatch(batch.id)" :aria-expanded="selectedBatch?.id===batch.id" class="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-2 text-left hover:bg-blue-50"><span class="min-w-0 flex-1"><b class="block truncate">📁 {{ batch.name }}</b><small class="mt-1 block truncate text-slate-500">{{ batch.row_count }} rows · {{ batch.original_filename }}</small></span><span class="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-lg text-slate-600">{{ selectedBatch?.id===batch.id?'⌄':'›' }}</span></button>
-              <button @click="downloadBatchPdf(batch)" :disabled="pdfDownloading||deletingId!==null" class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-indigo-200 bg-white px-2 py-2 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50" :title="`Download all ${batch.row_count} labels in this folder as a two-per-page PDF`"><span v-if="pdfDownloading&&pdfBatchId===batch.id" class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-700" aria-hidden="true"></span>{{ pdfDownloading&&pdfBatchId===batch.id ? `Preparing ${pdfProgress.current}/${pdfProgress.total}…` : 'Download PDF' }}</button>
+              <button @click="downloadBatchPdf(batch)" :disabled="pdfDownloading||deletingId!==null" class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-indigo-200 bg-white px-2 py-2 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50" :title="`Download all ${batch.row_count} labels in this folder as a two-per-page PDF`"><span v-if="pdfDownloading&&pdfBatchId===batch.id" class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-700" aria-hidden="true"></span>{{ pdfDownloading&&pdfBatchId===batch.id ? (pdfStage === 'Building PDF' ? 'Building PDF…' : `Loading ${Math.min(pdfProgress.current + 1, pdfProgress.total)}/${pdfProgress.total}…`) : 'Download PDF' }}</button>
               <button @click="deleteBatch(batch)" :disabled="!deleteEnabled||deletingId!==null||pdfDownloading" class="inline-flex shrink-0 items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40" :title="deleteEnabled ? 'Delete this workbook folder and all its labels' : 'Sign in again to delete your data'"><span v-if="deletingId===`batch-${batch.id}`" class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-red-200 border-t-red-700" aria-hidden="true"></span>{{ deletingId===`batch-${batch.id}` ? 'Deleting…' : 'Delete folder' }}</button>
             </div>
             <div v-if="selectedBatch?.id===batch.id" class="max-h-[60vh] overflow-auto p-2">
