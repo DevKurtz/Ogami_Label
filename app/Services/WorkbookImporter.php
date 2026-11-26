@@ -112,11 +112,22 @@ class WorkbookImporter
                         for ($column = $startColumn; $column <= $endColumn; $column++) $values[] = $sheet->getCell([$column, $row])->getFormattedValue();
                         if (count(array_filter($values, fn ($value) => trim((string) $value) !== ''))) $sample[] = $values;
                     }
+                    $dataRows = 0;
+                    for ($row = $headerRow + 1; $row <= $lastSegmentRow; $row++) {
+                        for ($column = $startColumn; $column <= $endColumn; $column++) {
+                            if (trim((string) $sheet->getCell([$column, $row])->getFormattedValue()) !== '') { $dataRows++; break; }
+                        }
+                    }
                     $tables[] = [
                         'id' => "s{$sheetIndex}-r{$headerRow}-c{$startColumn}-{$endColumn}",
                         'tableName' => 'Table '.(count(array_filter($tables, fn ($table) => $table['sheetIndex'] === $sheetIndex)) + 1),
                         'sheetIndex' => $sheetIndex,
                         'sheetName' => $sheet->getTitle(),
+                        // A one-row block is often a title/metadata range (for example MASTER)
+                        // adjacent to the actual records. Keep it selectable, but don't import it
+                        // automatically alongside a larger data table.
+                        'defaultSelected' => $dataRows > 1,
+                        'selectionNote' => $dataRows === 1 ? 'Only one data row was detected. Select this block if it is a real label table.' : null,
                         'headerRow' => $headerRow,
                         'startColumn' => $startColumn,
                         'endColumn' => $endColumn,
@@ -128,10 +139,20 @@ class WorkbookImporter
                             $suggested = str_contains($normalized, 'QR') ? 'qr' : (str_contains($normalized, 'BARCODE') || (preg_match('/SERIAL|QUANTITY|PARTNUMBER|SUPPLIER|DATECODE/', $normalized) && str_contains($normalized, 'CODE')) ? 'barcode' : null);
                             return ['header' => $header, 'suggestedType' => $suggested];
                         }, array_filter($groupHeaders, fn ($header) => preg_match('/code|barcode|qr/i', $header)))),
-                        'rowCount' => max(0, $lastSegmentRow - $headerRow),
+                        'rowCount' => $dataRows,
                     ];
                 }
             }
+        }
+
+        if ($tables && !collect($tables)->contains(fn ($table) => $table['defaultSelected'])) {
+            // A workbook containing only one-row tables may be a valid one-label import.
+            // In that case keep the detected blocks selected and let the user review them.
+            foreach ($tables as &$table) {
+                $table['defaultSelected'] = true;
+                $table['selectionNote'] = null;
+            }
+            unset($table);
         }
 
         return ['sheets' => array_map(fn ($sheet, $index) => ['index' => $index, 'name' => $sheet->getTitle()], $book->getAllSheets(), array_keys($book->getAllSheets())), 'tables' => $tables];

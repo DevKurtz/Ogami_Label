@@ -38,9 +38,17 @@ const builtInFields = [
     ['serialCode', 'Serial code'], ['quantityCode', 'Quantity code'], ['partNumberCode', 'Part number code'], ['supplierCode', 'Supplier code'],
 ];
 const selectedTables = computed(() => (analysis.value?.tables ?? []).filter((table) => selectedTableIds.value.includes(table.id)));
+function initialCodeTypes(tables) {
+    return Object.fromEntries(tables.map((table) => [table.id, Object.fromEntries((table.codeColumns ?? []).map((column) => [column.header, column.suggestedType ?? '']))]));
+}
+function selectRecommendedTables() {
+    const tables = analysis.value?.tables ?? [];
+    selectedTableIds.value = tables.filter((table) => table.defaultSelected !== false).map((table) => table.id);
+    codeTypes.value = initialCodeTypes(tables);
+}
 function selectAllTables() {
     selectedTableIds.value = (analysis.value?.tables ?? []).map((table) => table.id);
-    codeTypes.value = Object.fromEntries((analysis.value?.tables ?? []).map((table) => [table.id, Object.fromEntries((table.codeColumns ?? []).map((column) => [column.header, column.suggestedType ?? '']))]));
+    codeTypes.value = initialCodeTypes(analysis.value?.tables ?? []);
 }
 function selectNoTables() { selectedTableIds.value = []; }
 const errorLines = computed(() => error.value.split('\n').filter(Boolean));
@@ -118,7 +126,7 @@ async function analyzeWorkbook() {
     const form = new FormData(); form.append('file', file.value);
     try {
         analysis.value = await request('/api/analyze', { method: 'POST', body: form });
-        selectAllTables();
+        selectRecommendedTables();
     } catch (exception) { error.value = exception.message; }
     finally { analyzing.value = false; }
 }
@@ -141,8 +149,15 @@ function clearFile(input) {
     if (input) input.value = '';
 }
 async function openBatch(id) {
-    try { selectedBatch.value = await request(`/api/batches/${id}`); }
+    try {
+        selectedBatch.value = await request(`/api/batches/${id}`);
+        if (!selectedBatch.value.records?.some((record) => record.id === selectedRecord.value?.id)) selectedRecord.value = selectedBatch.value.records?.[0] ?? null;
+    }
     catch (exception) { error.value = exception.message; }
+}
+function toggleBatch(id) {
+    if (selectedBatch.value?.id === id) { selectedBatch.value = null; selectedRecord.value = null; return; }
+    openBatch(id);
 }
 function selectRecord(record) { selectedRecord.value = record; }
 function makeDefaultTemplate() {
@@ -354,7 +369,7 @@ onMounted(async () => {
             <p v-if="!analysis.tables.length" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">No table with a header and data rows was detected. Check that the table has column names in its first row.</p>
             <div v-else class="max-h-[520px] space-y-3 overflow-auto pr-1">
               <article v-for="table in analysis.tables" :key="table.id" class="rounded-xl border bg-white p-3" :class="selectedTableIds.includes(table.id)?'border-blue-400 ring-1 ring-blue-200':'border-slate-200'">
-                <label class="flex cursor-pointer items-start gap-3"><input v-model="selectedTableIds" type="checkbox" :value="table.id" class="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"><span class="min-w-0 flex-1"><b class="block">{{ table.sheetName }} · {{ table.tableName }}</b><small class="block text-slate-500">{{ table.rowCount }} data rows · header row {{ table.headerRow }} · {{ table.headers.join(' · ') }}</small></span></label>
+                <label class="flex cursor-pointer items-start gap-3"><input v-model="selectedTableIds" type="checkbox" :value="table.id" class="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"><span class="min-w-0 flex-1"><b class="block">{{ table.sheetName }} · {{ table.tableName }}</b><small class="block text-slate-500">{{ table.rowCount }} data rows · header row {{ table.headerRow }} · {{ table.headers.join(' · ') }}</small><small v-if="table.selectionNote" class="mt-1 block text-amber-700">{{ table.selectionNote }}</small></span></label>
                 <details class="ml-7 mt-2"><summary class="cursor-pointer text-xs font-medium text-blue-700">Preview detected rows</summary><div class="mt-2 overflow-x-auto rounded border border-slate-200"><table class="min-w-full text-left text-xs"><thead class="bg-slate-100"><tr><th v-for="(header,index) in table.headers" :key="index" class="whitespace-nowrap px-2 py-1.5">{{ header }}</th></tr></thead><tbody><tr v-for="(row,index) in table.sample" :key="index"><td v-for="(value,col) in row" :key="col" class="max-w-40 truncate border-t border-slate-100 px-2 py-1.5">{{ value }}</td></tr></tbody></table></div></details>
                 <div v-if="selectedTableIds.includes(table.id)&&table.codeColumns.length" class="ml-7 mt-3 space-y-2 rounded-lg bg-slate-50 p-3"><div><b class="text-xs">How should these codes appear on this canvas?</b><p class="text-xs text-slate-500">Your choice applies to this table only.</p></div><label v-for="column in table.codeColumns" :key="column.header" class="flex flex-wrap items-center justify-between gap-2 text-xs"><span>{{ column.header }} <small v-if="column.suggestedType" class="text-slate-500">· suggested {{ column.suggestedType === 'qr' ? 'QR code' : 'barcode' }}</small></span><select v-model="codeTypes[table.id][column.header]" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5"><option value="">Choose…</option><option value="barcode">Barcode</option><option value="qr">QR code</option><option value="text">Text only</option><option value="ignore">Do not show</option></select></label></div>
                 <p v-if="selectedTableIds.includes(table.id)" class="ml-7 mt-2 text-xs text-slate-500">Other columns stay available as variables in this table’s design editor.</p>
@@ -380,7 +395,7 @@ onMounted(async () => {
           <div v-if="!visibleBatches.length" class="p-8 text-center text-sm text-slate-500">No matching uploads yet.</div>
           <div v-for="batch in visibleBatches" :key="batch.id" class="mb-3 overflow-hidden rounded-xl border border-slate-200">
             <div class="flex items-center gap-2 bg-slate-50 p-2">
-              <button @click="openBatch(batch.id)" class="flex min-w-0 flex-1 items-center justify-between p-2 text-left"><span class="min-w-0"><b class="block truncate">📁 {{ batch.name }}</b><small class="mt-1 block truncate text-slate-500">{{ batch.row_count }} rows · {{ batch.original_filename }}</small></span><span>›</span></button>
+              <button @click="toggleBatch(batch.id)" :aria-expanded="selectedBatch?.id===batch.id" class="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-2 text-left hover:bg-blue-50"><span class="min-w-0 flex-1"><b class="block truncate">📁 {{ batch.name }}</b><small class="mt-1 block truncate text-slate-500">{{ batch.row_count }} rows · {{ batch.original_filename }}</small></span><span class="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-lg text-slate-600">{{ selectedBatch?.id===batch.id?'⌄':'›' }}</span></button>
               <button @click="deleteBatch(batch)" :disabled="!deleteEnabled||deletingId!==null" class="shrink-0 rounded-lg px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40" :title="deleteEnabled ? 'Delete this workbook folder and all its labels' : 'Sign in again to delete your data'">{{ deletingId===`batch-${batch.id}` ? 'Deleting…' : 'Delete folder' }}</button>
             </div>
             <div v-if="selectedBatch?.id===batch.id" class="max-h-[60vh] overflow-auto p-2">
