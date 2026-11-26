@@ -13,3 +13,4 @@ Route::middleware(['web', 'auth', 'throttle:60,1'])->group(function () {
     Route::delete('/records/{record}', [BatchController::class, 'destroyRecord'])->middleware('throttle:5,1');
     Route::get('/records/{record}/label.svg', [LabelController::class, 'show']);
 });
+
