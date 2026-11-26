@@ -54,7 +54,8 @@ class BatchController extends Controller
             'template.elements.*.x' => ['required', 'numeric', 'min:0', 'max:760'],
             'template.elements.*.y' => ['required', 'numeric', 'min:0', 'max:535'],
             'template.elements.*.w' => ['required', 'numeric', 'min:20', 'max:760'],
-            'template.elements.*.h' => ['required', 'numeric', 'min:20', 'max:535'],
+            // Small caption elements beneath barcodes can be shorter than 20px.
+            'template.elements.*.h' => ['required', 'numeric', 'min:8', 'max:535'],
             'template.elements.*.fontSize' => ['nullable', 'integer', 'min:8', 'max:64'],
         ]);
         $ownedBatch->label_template = $validated['template'];
