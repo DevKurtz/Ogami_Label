@@ -48,10 +48,15 @@ const pdfDownloading = ref(false);
 const pdfProgress = ref({ current: 0, total: 0 });
 const pdfBatchId = ref(null);
 const pdfStage = ref('Loading labels');
+const pdfBatchName = ref('');
+const pdfProgressPercent = computed(() => pdfStage.value === 'Building PDF' ? 100 : pdfProgress.value.total ? Math.round(pdfProgress.value.current / pdfProgress.value.total * 100) : 0);
 const downloadError = ref('');
 const deleteEnabled = ref(false);
 const userName = document.querySelector('meta[name="user-name"]')?.content ?? '';
 const deletingId = ref(null);
+const deletingFolderName = ref('');
+const deletingFolder = computed(() => typeof deletingId.value === 'string' && deletingId.value.startsWith('batch-'));
+const historyLoading = ref(true);
 const historyMessage = ref('');
 const historyError = ref('');
 const analysis = ref(null);
@@ -365,6 +370,7 @@ async function deleteBatch(batch) {
     if (!deleteEnabled.value || deletingId.value) return;
     if (!await confirmDelete('Delete this folder?', `“${batch.name}” and all ${batch.row_count} label record(s) will be permanently deleted.`, 'Delete folder')) return;
     deletingId.value = `batch-${batch.id}`;
+    deletingFolderName.value = batch.name;
     historyError.value = '';
     historyMessage.value = '';
     try {
@@ -377,7 +383,7 @@ async function deleteBatch(batch) {
         historyMessage.value = `Workbook folder “${batch.name}” and its labels were deleted.`;
         notify('success', 'Folder deleted', 'The workbook and its labels were removed.');
     } catch (exception) { historyError.value = exception.message; notify('error', 'Could not delete folder', exception.message); }
-    finally { deletingId.value = null; }
+    finally { deletingId.value = null; deletingFolderName.value = ''; }
 }
 async function deleteRecord(record) {
     if (!deleteEnabled.value || deletingId.value) return;
@@ -578,6 +584,7 @@ async function downloadBatchPdf(batch = selectedBatch.value) {
     if (!batch || pdfDownloading.value) return;
     pdfDownloading.value = true;
     pdfBatchId.value = batch.id;
+    pdfBatchName.value = batch.name;
     try {
         let pdfBatch = batch;
         let batchRecords = selectedBatch.value?.id === batch.id ? records.value : null;
@@ -614,11 +621,14 @@ async function downloadBatchPdf(batch = selectedBatch.value) {
     } finally {
         pdfDownloading.value = false;
         pdfBatchId.value = null;
+        pdfBatchName.value = '';
     }
 }
 
 onMounted(async () => {
+    historyLoading.value = true;
     try { await refreshBatches(); } catch (exception) { error.value = exception.message; notify('error', 'Could not load History', exception.message); }
+    finally { historyLoading.value = false; }
     try { deleteEnabled.value = (await request('/api/delete-status')).enabled; } catch { deleteEnabled.value = false; }
 });
 onBeforeUnmount(endCanvasInteraction);
@@ -704,12 +714,13 @@ onBeforeUnmount(endCanvasInteraction);
         <div v-if="historyError" role="alert" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{{ historyError }}</div>
         <div class="grid gap-5 lg:grid-cols-[390px_1fr]">
         <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div v-if="!visibleBatches.length" class="p-8 text-center text-sm text-slate-500">No matching uploads yet.</div>
+          <div v-if="historyLoading" role="status" aria-live="polite" class="space-y-3 p-3"><div class="flex items-center gap-3 rounded-lg bg-blue-50 p-4 text-sm font-medium text-blue-800"><span class="h-5 w-5 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" aria-hidden="true"></span>Loading your folders…</div><div v-for="item in 3" :key="item" class="animate-pulse rounded-xl border border-slate-200 p-4"><div class="h-4 w-2/3 rounded bg-slate-200"></div><div class="mt-3 h-3 w-1/2 rounded bg-slate-100"></div></div></div>
+          <div v-else-if="!visibleBatches.length" class="p-8 text-center text-sm text-slate-500">No matching uploads yet.</div>
           <div v-for="batch in visibleBatches" :key="batch.id" class="mb-3 overflow-hidden rounded-xl border border-slate-200">
             <div class="flex flex-wrap items-center gap-2 bg-slate-50 p-2">
               <button @click="toggleBatch(batch.id)" :aria-expanded="selectedBatch?.id===batch.id" class="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-2 text-left hover:bg-blue-50"><span class="min-w-0 flex-1"><b class="block truncate">📁 {{ batch.name }}</b><small class="mt-1 block truncate text-slate-500">{{ batch.row_count }} rows · {{ batch.original_filename }}</small></span><span class="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-lg text-slate-600">{{ selectedBatch?.id===batch.id?'⌄':'›' }}</span></button>
-              <button @click="downloadBatchPdf(batch)" :disabled="pdfDownloading||deletingId!==null" class="inline-flex shrink-0 items-center gap-2 rounded-lg border border-indigo-200 bg-white px-2 py-2 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50" :title="`Download all ${batch.row_count} labels in this folder as a two-per-page PDF`"><span v-if="pdfDownloading&&pdfBatchId===batch.id" class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-indigo-200 border-t-indigo-700" aria-hidden="true"></span>{{ pdfDownloading&&pdfBatchId===batch.id ? (pdfStage === 'Building PDF' ? 'Building PDF…' : `Loading ${Math.min(pdfProgress.current + 1, pdfProgress.total)}/${pdfProgress.total}…`) : 'Download PDF' }}</button>
-              <button @click="deleteBatch(batch)" :disabled="!deleteEnabled||deletingId!==null||pdfDownloading" class="inline-flex shrink-0 items-center gap-2 rounded-lg px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40" :title="deleteEnabled ? 'Delete this workbook folder and all its labels' : 'Sign in again to delete your data'"><span v-if="deletingId===`batch-${batch.id}`" class="h-3.5 w-3.5 animate-spin rounded-full border-2 border-red-200 border-t-red-700" aria-hidden="true"></span>{{ deletingId===`batch-${batch.id}` ? 'Deleting…' : 'Delete folder' }}</button>
+              <button @click="downloadBatchPdf(batch)" :disabled="pdfDownloading||deletingId!==null" class="shrink-0 rounded-lg border border-indigo-200 bg-white px-2 py-2 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50" :title="`Download all ${batch.row_count} labels in this folder as a two-per-page PDF`">Download PDF</button>
+              <button @click="deleteBatch(batch)" :disabled="!deleteEnabled||deletingId!==null||pdfDownloading" class="shrink-0 rounded-lg px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40" :title="deleteEnabled ? 'Delete this workbook folder and all its labels' : 'Sign in again to delete your data'">Delete folder</button>
             </div>
             <div v-if="selectedBatch?.id===batch.id" class="max-h-[60vh] overflow-auto p-2">
               <div v-for="record in records" :key="record.id" class="flex items-center gap-1 border-b border-slate-100 hover:bg-blue-50" :class="selectedRecord?.id===record.id?'bg-blue-50':''">
@@ -737,6 +748,19 @@ onBeforeUnmount(endCanvasInteraction);
         </div>
       </section>
     </main>
+    <div v-if="pdfDownloading||deletingFolder" class="fixed inset-0 z-[60] grid place-items-center bg-slate-950/40 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-live="polite" aria-busy="true" :aria-label="pdfDownloading ? 'Preparing folder PDF' : 'Deleting workbook folder'">
+      <section class="w-full max-w-md rounded-2xl bg-white p-7 text-center shadow-2xl ring-1 ring-slate-200">
+        <div class="relative mx-auto mb-5 grid h-16 w-16 place-items-center"><span class="absolute inset-0 animate-ping rounded-full bg-blue-100 opacity-60" style="animation-duration: 2s"></span><span class="relative h-12 w-12 animate-spin rounded-full border-[5px] border-blue-100 border-t-blue-600" aria-hidden="true"></span></div>
+        <h2 class="text-xl font-bold text-slate-900">{{ pdfDownloading ? 'Preparing your PDF' : 'Deleting folder' }}</h2>
+        <p class="mt-2 break-words text-sm text-slate-600">{{ pdfDownloading ? pdfBatchName : deletingFolderName }}</p>
+        <template v-if="pdfDownloading">
+          <p class="mt-4 text-sm font-medium text-blue-700">{{ pdfStage === 'Building PDF' ? 'Assembling the two-per-page PDF…' : `Loading label ${Math.min(pdfProgress.current + 1, pdfProgress.total || 1)} of ${pdfProgress.total || '…'}…` }}</p>
+          <div class="mt-3 h-2 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-blue-600 transition-[width] duration-300" :style="{ width: `${pdfProgressPercent}%` }"></div></div>
+          <p class="mt-2 text-xs text-slate-500">{{ pdfProgressPercent }}% complete · Keep this page open.</p>
+        </template>
+        <p v-else class="mt-4 text-sm text-slate-600">Removing this workbook and its label records from your account…</p>
+      </section>
+    </div>
     <div v-if="editorOpen" class="fixed inset-0 z-40 flex flex-col bg-slate-100" role="dialog" aria-modal="true" aria-label="Label design editor">
       <header class="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-5 py-3"><div class="mr-auto"><b class="text-lg">{{ draftDesignMode ? `Design ${designTableIndex + 1} of ${designTables.length} · ${designTable?.sheetName} / ${designTable?.tableName}` : 'Label design editor' }}</b><p class="text-xs text-slate-500">{{ draftDesignMode ? 'Start with a blank canvas. Add and arrange the fields, barcodes, QR codes, and borders you want.' : 'Double-click static text on the canvas to edit it. Drag items to move or resize them.' }}</p></div><span v-if="templateMessage" class="text-sm text-emerald-700">{{ templateMessage }}</span><span v-if="templateError" class="text-sm text-red-700">{{ templateError }}</span><button @click="saveTemplate" :disabled="templateSaving" class="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50">{{ templateSaving ? 'Saving…' : (draftDesignMode ? (designTableIndex + 1 < designTables.length ? 'Save design & next table' : 'Create records') : 'Save design') }}</button><button @click="editorOpen=false; draftDesignMode=false" class="rounded-lg border border-slate-300 px-4 py-2">{{ draftDesignMode ? 'Cancel' : 'Close' }}</button></header>
       <div class="grid min-h-0 flex-1 lg:grid-cols-[270px_minmax(0,1fr)_300px]">
