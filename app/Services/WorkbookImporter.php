@@ -4,6 +4,7 @@ namespace App\Services;
 
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use RuntimeException;
 
@@ -47,22 +48,116 @@ class WorkbookImporter
         'qrCode' => ['QR CODE'],
     ];
 
-    public function import(string $path): array
+    public function analyze(string $path): array
     {
         $book = IOFactory::load($path);
-        $sheet = $book->getSheet(0);
-        $lastColumn = $sheet->getHighestDataColumn();
-        $lastRow = $sheet->getHighestDataRow();
+        $tables = [];
+
+        foreach ($book->getAllSheets() as $sheetIndex => $sheet) {
+            $lastColumn = Coordinate::columnIndexFromString($sheet->getHighestDataColumn());
+            $lastRow = $sheet->getHighestDataRow();
+            if ($lastRow > 50000 || $lastColumn > 250) throw new RuntimeException("Worksheet “{$sheet->getTitle()}” is too large to analyze safely. Keep each worksheet within 50,000 rows and 250 columns.");
+            $segments = [];
+            $segmentStart = null;
+
+            for ($row = 1; $row <= $lastRow + 1; $row++) {
+                $hasValues = false;
+                if ($row <= $lastRow) {
+                    for ($column = 1; $column <= $lastColumn; $column++) {
+                        $value = $sheet->getCell([$column, $row])->getValue();
+                        if ($value !== null && trim((string) $value) !== '') { $hasValues = true; break; }
+                    }
+                }
+                if ($hasValues && $segmentStart === null) $segmentStart = $row;
+                if (!$hasValues && $segmentStart !== null) {
+                    $segments[] = [$segmentStart, $row - 1];
+                    $segmentStart = null;
+                }
+            }
+
+            foreach ($segments as [$firstRow, $lastSegmentRow]) {
+                $headerRow = $firstRow;
+                $bestScore = -1;
+                for ($row = $firstRow; $row <= min($lastSegmentRow, $firstRow + 8); $row++) {
+                    $values = $sheet->rangeToArray("A{$row}:{$sheet->getHighestDataColumn()}{$row}", null, false, false)[0] ?? [];
+                    $nonEmpty = array_values(array_filter($values, fn ($value) => trim((string) $value) !== ''));
+                    $joined = Str::lower(implode(' ', array_map('strval', $nonEmpty)));
+                    $score = min(count($nonEmpty), 6) + preg_match_all('/part|quantity|serial|code|date|name|supplier|weight|model|description/i', $joined);
+                    if (count($nonEmpty) >= 2 && $score > $bestScore) { $bestScore = $score; $headerRow = $row; }
+                }
+
+                $headers = [];
+                $occupiedColumns = [];
+                for ($column = 1; $column <= $lastColumn; $column++) {
+                    $value = trim((string) $sheet->getCell([$column, $headerRow])->getFormattedValue());
+                    $headers[$column] = $value;
+                    if ($value !== '') $occupiedColumns[] = $column;
+                }
+                if (count($occupiedColumns) < 2) continue;
+
+                // Empty header columns often separate adjacent tables in the same worksheet.
+                $columnGroups = [];
+                foreach ($occupiedColumns as $column) {
+                    $lastGroup = array_key_last($columnGroups);
+                    if ($lastGroup === null || $column > $columnGroups[$lastGroup][1] + 1) $columnGroups[] = [$column, $column];
+                    else $columnGroups[$lastGroup][1] = $column;
+                }
+                foreach ($columnGroups as [$startColumn, $endColumn]) {
+                    $groupHeaders = [];
+                    foreach (range($startColumn, $endColumn) as $column) if ($headers[$column] !== '') $groupHeaders[] = $headers[$column];
+                    if (count($groupHeaders) < 2 || $lastSegmentRow <= $headerRow) continue;
+                    $sample = [];
+                    for ($row = $headerRow + 1; $row <= $lastSegmentRow && count($sample) < 3; $row++) {
+                        $values = [];
+                        for ($column = $startColumn; $column <= $endColumn; $column++) $values[] = $sheet->getCell([$column, $row])->getFormattedValue();
+                        if (count(array_filter($values, fn ($value) => trim((string) $value) !== ''))) $sample[] = $values;
+                    }
+                    $tables[] = [
+                        'id' => "s{$sheetIndex}-r{$headerRow}-c{$startColumn}-{$endColumn}",
+                        'sheetIndex' => $sheetIndex,
+                        'sheetName' => $sheet->getTitle(),
+                        'headerRow' => $headerRow,
+                        'startColumn' => $startColumn,
+                        'endColumn' => $endColumn,
+                        'endRow' => $lastSegmentRow,
+                        'headers' => array_map(fn ($column) => $headers[$column] !== '' ? $headers[$column] : "Column {$column}", range($startColumn, $endColumn)),
+                        'sample' => $sample,
+                        'codeColumns' => array_values(array_map(function ($header) {
+                            $normalized = $this->normalize($header);
+                            $suggested = str_contains($normalized, 'QR') ? 'qr' : (preg_match('/SERIAL|QUANTITY|PARTNUMBER|SUPPLIER|DATECODE/', $normalized) && str_contains($normalized, 'CODE') ? 'barcode' : null);
+                            return ['header' => $header, 'suggestedType' => $suggested];
+                        }, array_filter($groupHeaders, fn ($header) => preg_match('/code|barcode|qr/i', $header)))),
+                        'rowCount' => max(0, $lastSegmentRow - $headerRow),
+                    ];
+                }
+            }
+        }
+
+        return ['sheets' => array_map(fn ($sheet, $index) => ['index' => $index, 'name' => $sheet->getTitle()], $book->getAllSheets(), array_keys($book->getAllSheets())), 'tables' => $tables];
+    }
+
+    public function import(string $path, ?array $table = null): array
+    {
+        $book = IOFactory::load($path);
+        $sheetIndex = (int) ($table['sheetIndex'] ?? 0);
+        if (!isset($book->getAllSheets()[$sheetIndex])) throw new RuntimeException('The selected worksheet could not be found. Analyze the workbook again.');
+        $sheet = $book->getSheet($sheetIndex);
+        $headerRow = (int) ($table['headerRow'] ?? 1);
+        $startColumn = (int) ($table['startColumn'] ?? 1);
+        $endColumn = (int) ($table['endColumn'] ?? Coordinate::columnIndexFromString($sheet->getHighestDataColumn()));
+        $lastRow = min((int) ($table['endRow'] ?? $sheet->getHighestDataRow()), $sheet->getHighestDataRow());
+        if ($headerRow < 1 || $startColumn < 1 || $endColumn < $startColumn || $endColumn > 250 || $lastRow > 50000 || $headerRow >= $lastRow) throw new RuntimeException('The selected table has no data rows or exceeds the supported worksheet size. Analyze the workbook again and choose another table.');
         $headers = [];
-        foreach ($sheet->rangeToArray("A1:{$lastColumn}1", null, false, false)[0] ?? [] as $header) {
-            $headers[] = trim((string) $header);
+        for ($column = $startColumn; $column <= $endColumn; $column++) {
+            $header = trim((string) $sheet->getCell([$column, $headerRow])->getFormattedValue());
+            $headers[$column] = $header !== '' ? $header : "Column {$column}";
         }
         $indices = [];
         foreach (self::FIELDS as $key => $aliases) {
             $wanted = array_map(fn ($value) => $this->normalize($value), $aliases);
             foreach ($headers as $index => $header) {
                 if (in_array($this->normalize($header), $wanted, true)) {
-                    $indices[$key] = $index + 1;
+                    $indices[$key] = $index;
                     break;
                 }
             }
@@ -70,7 +165,7 @@ class WorkbookImporter
 
         $rows = [];
         $errors = [];
-        for ($rowNumber = 2; $rowNumber <= $lastRow; $rowNumber++) {
+        for ($rowNumber = $headerRow + 1; $rowNumber <= $lastRow; $rowNumber++) {
             $row = array_fill_keys(array_keys(self::FIELDS), '');
             foreach ($indices as $key => $column) {
                 $cell = $sheet->getCell([$column, $rowNumber]);
@@ -88,17 +183,28 @@ class WorkbookImporter
                 }
                 $row[$key] = trim((string) $value);
             }
-            if (count(array_filter($row, fn ($value) => $value !== '')) === 0) {
+            $extras = [];
+            foreach ($headers as $column => $header) {
+                $cell = $sheet->getCell([$column, $rowNumber]);
+                $value = trim((string) $cell->getFormattedValue());
+                if ($value !== '' && preg_match('/code|serial|qr|barcode/i', $header) && $cell->getDataType() === \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC) {
+                    $numericDigits = preg_replace('/\D/', '', sprintf('%.0f', (float) $cell->getValue())) ?? '';
+                    if (strlen(ltrim($numericDigits, '0')) > 15) $errors[] = "Row {$rowNumber}: “{$header}” is stored as a number with more than 15 significant digits. Re-enter it as Excel text to prevent precision loss.";
+                }
+                if ($value !== '') $extras[] = ['name' => $header, 'value' => $value];
+            }
+            $row['customFields'] = $extras;
+            if (!count(array_filter(array_slice($row, 0, count(self::FIELDS)), fn ($value) => $value !== '')) && !$extras) {
                 continue;
             }
 
             $rows[] = ['row_number' => $rowNumber, 'data' => $row];
         }
 
-        if (!$rows) throw new RuntimeException('No data rows were found in the first worksheet.');
+        if (!$rows) throw new RuntimeException('No data rows were found in the selected table.');
         if ($errors) throw new RuntimeException(implode("\n", array_slice($errors, 0, 12)));
 
-        return ['headers' => $headers, 'rows' => $rows];
+        return ['headers' => array_values($headers), 'rows' => $rows];
     }
 
     private function normalize(string $value): string

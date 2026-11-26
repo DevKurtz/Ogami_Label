@@ -9,11 +9,24 @@ use App\Services\WorkbookImporter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
 
 class BatchController extends Controller
 {
+    public function analyze(Request $request, WorkbookImporter $importer): JsonResponse
+    {
+        $validated = $request->validate(['file' => ['required', 'file', 'max:4096', 'mimes:xlsx,xlsm,xls,csv']]);
+        try {
+            return response()->json($importer->analyze($validated['file']->getRealPath()));
+        } catch (RuntimeException $exception) {
+            throw ValidationException::withMessages(['file' => $exception->getMessage()]);
+        } catch (\Throwable) {
+            throw ValidationException::withMessages(['file' => 'The workbook could not be analyzed. Check that it is a valid Excel file.']);
+        }
+    }
+
     public function index(Request $request): JsonResponse
     {
         return response()->json($request->user()->batches()->withCount('records')->latest()->get());
@@ -22,6 +35,28 @@ class BatchController extends Controller
     public function show(Request $request, WorkbookBatch $batch): JsonResponse
     {
         $ownedBatch = $request->user()->batches()->whereKey($batch->getKey())->firstOrFail();
+
+        return response()->json($ownedBatch->load(['records' => fn ($query) => $query->orderBy('row_number')]));
+    }
+
+    public function updateTemplate(Request $request, WorkbookBatch $batch): JsonResponse
+    {
+        $ownedBatch = $request->user()->batches()->whereKey($batch->getKey())->firstOrFail();
+        $validated = $request->validate([
+            'template' => ['required', 'array'],
+            'template.elements' => ['required', 'array', 'max:80'],
+            'template.elements.*.id' => ['required', 'string', 'max:80'],
+            'template.elements.*.type' => ['required', Rule::in(['text', 'barcode', 'qr'])],
+            'template.elements.*.field' => ['nullable', 'string', 'max:160'],
+            'template.elements.*.label' => ['nullable', 'string', 'max:160'],
+            'template.elements.*.x' => ['required', 'numeric', 'min:0', 'max:760'],
+            'template.elements.*.y' => ['required', 'numeric', 'min:0', 'max:535'],
+            'template.elements.*.w' => ['required', 'numeric', 'min:20', 'max:760'],
+            'template.elements.*.h' => ['required', 'numeric', 'min:20', 'max:535'],
+            'template.elements.*.fontSize' => ['nullable', 'integer', 'min:8', 'max:64'],
+        ]);
+        $ownedBatch->label_template = $validated['template'];
+        $ownedBatch->save();
 
         return response()->json($ownedBatch->load(['records' => fn ($query) => $query->orderBy('row_number')]));
     }
@@ -58,21 +93,34 @@ class BatchController extends Controller
         $validated = $request->validate([
             'file' => ['required', 'file', 'max:4096', 'mimes:xlsx,xlsm,xls,csv'],
             'name' => ['nullable', 'string', 'max:160'],
+            'table' => ['nullable', 'array'],
+            'table.sheetIndex' => ['nullable', 'integer', 'min:0'],
+            'table.headerRow' => ['nullable', 'integer', 'min:1'],
+            'table.startColumn' => ['nullable', 'integer', 'min:1'],
+            'table.endColumn' => ['nullable', 'integer', 'min:1'],
+            'table.endRow' => ['nullable', 'integer', 'min:2'],
+            'code_types' => ['nullable', 'string', 'max:8000'],
         ]);
 
         try {
-            $imported = $importer->import($validated['file']->getRealPath());
+            $imported = $importer->import($validated['file']->getRealPath(), $validated['table'] ?? null);
         } catch (RuntimeException $exception) {
             throw ValidationException::withMessages(['file' => $exception->getMessage()]);
         } catch (\Throwable $exception) {
-            throw ValidationException::withMessages(['file' => 'The workbook could not be read. Check that it is a valid Excel file with its data on the first worksheet.']);
+            throw ValidationException::withMessages(['file' => 'The workbook could not be read. Analyze it again and choose one of its detected table sections.']);
         }
 
-        $batch = DB::transaction(function () use ($validated, $request, $imported) {
+        $fieldConfig = json_decode($validated['code_types'] ?? '{}', true);
+        if (!is_array($fieldConfig) || array_diff($fieldConfig, ['qr', 'barcode', 'text', 'ignore'])) {
+            throw ValidationException::withMessages(['file' => 'Choose QR code, barcode, text, or ignore for each detected code column.']);
+        }
+
+        $batch = DB::transaction(function () use ($validated, $request, $imported, $fieldConfig) {
             $batch = $request->user()->batches()->create([
                 'name' => $validated['name'] ?: $validated['file']->getClientOriginalName(),
                 'original_filename' => $validated['file']->getClientOriginalName(),
                 'row_count' => count($imported['rows']),
+                'field_config' => $fieldConfig,
             ]);
             foreach ($imported['rows'] as $entry) {
                 $data = $entry['data'];
