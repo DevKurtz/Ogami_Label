@@ -67,7 +67,16 @@ class LabelController extends Controller
         foreach ($cells as $cell) $svg[] = sprintf('<clipPath id="clip-%s"><rect x="%d" y="%d" width="%d" height="%d"/></clipPath>', $cell['id'], $cell['x'] + 3, $cell['y'] + 3, $cell['w'] - 6, $cell['h'] - 6);
         $svg[] = '</defs><rect x="1" y="1" width="758" height="533" fill="white" stroke="#111" stroke-width="2"/>';
         foreach ($cells as $cell) $svg[] = sprintf('<rect x="%d" y="%d" width="%d" height="%d" fill="none" stroke="#111" stroke-width="1.2"/>', $cell['x'], $cell['y'], $cell['w'], $cell['h']);
-        $text = fn ($x,$y,$value,$size=18,$anchor='start',$cell='part',$maxWidth=null) => sprintf('<text x="%d" y="%d" font-family="Arial,sans-serif" font-size="%d" text-anchor="%s" clip-path="url(#clip-%s)"%s>%s</text>', $x,$y,$size,$anchor,$cell,$maxWidth ? ' textLength="'.$maxWidth.'" lengthAdjust="spacingAndGlyphs"' : '',e((string) $value));
+        $text = function ($x,$y,$value,$size=18,$anchor='start',$cell='part',$maxWidth=null) {
+            $value = (string) $value;
+            if ($maxWidth && $value !== '') {
+                $characters = function_exists('mb_strlen') ? mb_strlen($value, 'UTF-8') : strlen($value);
+                $estimatedWidth = $characters * $size * 0.58;
+                if ($estimatedWidth > $maxWidth) $size = max(8, (int) floor($size * $maxWidth / $estimatedWidth));
+            }
+
+            return sprintf('<text x="%d" y="%d" font-family="Arial,sans-serif" font-size="%d" text-anchor="%s" clip-path="url(#clip-%s)">%s</text>', $x,$y,$size,$anchor,$cell,e($value));
+        };
         if (!empty($batch->label_template['elements']) && is_array($batch->label_template['elements'])) {
             $elements = $batch->label_template['elements'];
             $svg = ['<svg xmlns="http://www.w3.org/2000/svg" width="152mm" height="107mm" viewBox="0 0 760 535"><defs>'];

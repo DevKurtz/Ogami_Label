@@ -54,6 +54,7 @@ class WorkbookImporter
         $tables = [];
 
         foreach ($book->getAllSheets() as $sheetIndex => $sheet) {
+            if ($sheet->getSheetState() !== \PhpOffice\PhpSpreadsheet\Worksheet\Worksheet::SHEETSTATE_VISIBLE) continue;
             $lastColumn = Coordinate::columnIndexFromString($sheet->getHighestDataColumn());
             $lastRow = $sheet->getHighestDataRow();
             if ($lastRow > 50000 || $lastColumn > 250) throw new RuntimeException("Worksheet “{$sheet->getTitle()}” is too large to analyze safely. Keep each worksheet within 50,000 rows and 250 columns.");
@@ -146,6 +147,16 @@ class WorkbookImporter
             }
         }
 
+        $hasMultiRowTable = collect($tables)->contains(fn ($table) => $table['rowCount'] > 1);
+        if ($hasMultiRowTable) {
+            // MASTER/SUMMARY/TEMPLATE tabs often contain only a single lookup or example row.
+            // Don't present those auxiliary tabs as extra label tables beside the real records.
+            $tables = array_values(array_filter($tables, fn ($table) => !(
+                $table['rowCount'] === 1
+                && preg_match('/^(MASTER|SUMMARY|TEMPLATE)$/i', trim($table['sheetName']))
+            )));
+        }
+
         if ($tables && !collect($tables)->contains(fn ($table) => $table['defaultSelected'])) {
             // A workbook containing only one-row tables may be a valid one-label import.
             // In that case keep the detected blocks selected and let the user review them.
@@ -156,7 +167,13 @@ class WorkbookImporter
             unset($table);
         }
 
-        return ['sheets' => array_map(fn ($sheet, $index) => ['index' => $index, 'name' => $sheet->getTitle()], $book->getAllSheets(), array_keys($book->getAllSheets())), 'tables' => $tables];
+        $tableSheetIndexes = array_unique(array_column($tables, 'sheetIndex'));
+        $detectedSheets = [];
+        foreach ($book->getAllSheets() as $index => $sheet) {
+            if (in_array($index, $tableSheetIndexes, true)) $detectedSheets[] = ['index' => $index, 'name' => $sheet->getTitle()];
+        }
+
+        return ['sheets' => $detectedSheets, 'tables' => $tables];
     }
 
     public function import(string $path, ?array $table = null): array
@@ -259,7 +276,7 @@ class WorkbookImporter
 
     private function normalize(string $value): string
     {
-        return Str::upper(preg_replace('/[\s().]/u', '', str_replace(['①', '②'], ['1', '2'], $value)) ?? '');
+        return Str::upper(preg_replace('/[^\pL\pN]/u', '', str_replace(['①', '②', '⓵', '⓶'], ['1', '2', '1', '2'], $value)) ?? '');
     }
 
     private function formatMfgDate(string $value): string
