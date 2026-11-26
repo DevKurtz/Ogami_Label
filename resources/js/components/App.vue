@@ -31,6 +31,9 @@ const canvasElement = ref(null);
 const templateSaving = ref(false);
 const templateMessage = ref('');
 const templateError = ref('');
+const draftDesignMode = ref(false);
+const draftTemplates = ref({});
+const designTableIndex = ref(0);
 const builtInFields = [
     ['partNumber', 'Part number'], ['partName', 'Part name'], ['quantity', 'Quantity'], ['modelName', 'Model name'],
     ['cartonWeight', 'Carton weight'], ['supplierNumber', 'Supplier number'], ['mfgDate', 'Manufacturing date'],
@@ -38,6 +41,8 @@ const builtInFields = [
     ['serialCode', 'Serial code'], ['quantityCode', 'Quantity code'], ['partNumberCode', 'Part number code'], ['supplierCode', 'Supplier code'],
 ];
 const selectedTables = computed(() => (analysis.value?.tables ?? []).filter((table) => selectedTableIds.value.includes(table.id)));
+const designTables = computed(() => selectedTables.value.filter((table) => !table.legacyFormat));
+const designTable = computed(() => designTables.value[designTableIndex.value] ?? null);
 function initialCodeTypes(tables) {
     return Object.fromEntries(tables.map((table) => [table.id, Object.fromEntries((table.codeColumns ?? []).map((column) => [column.header, column.suggestedType ?? '']))]));
 }
@@ -76,20 +81,21 @@ const visibleBatches = computed(() => batches.value.filter((batch) => {
 const records = computed(() => selectedBatch.value?.records ?? []);
 const recordIndex = computed(() => records.value.findIndex((record) => record.id === selectedRecord.value?.id));
 const availableFields = computed(() => {
+    if (draftDesignMode.value) return (designTable.value?.headers ?? []).map((field) => [field, field]);
     const custom = selectedRecord.value?.data?.customFields ?? [];
     return [...builtInFields, ...custom.map((field) => [field.name, field.name])];
 });
 const elementValue = (element) => {
+    if (draftDesignMode.value) {
+        const headers = designTable.value?.headers ?? [];
+        const row = designTable.value?.sample?.[0] ?? [];
+        const index = headers.indexOf(element.field);
+        return index >= 0 ? String(row[index] ?? '') : '';
+    }
     const data = selectedRecord.value?.data ?? {};
     if (element.type === 'text' && !element.field) return element.label ?? '';
     return data[element.field] ?? data.customFields?.find((field) => field.name === element.field)?.value ?? '';
 };
-const codeTypeFor = (field) => {
-    const chosen = selectedBatch.value?.field_config?.[field];
-    if (chosen === 'qr' || chosen === 'barcode') return chosen;
-    return /qr/i.test(field) ? 'qr' : 'barcode';
-};
-
 async function request(url, options = {}) {
     const response = await fetch(url, { credentials: 'same-origin', ...options, headers: { Accept: 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '', ...options.headers } });
     const body = await response.json();
@@ -103,7 +109,11 @@ async function upload() {
     if (!file.value || !selectedTables.value.length) return;
     loading.value = true; error.value = ''; success.value = null;
     const form = new FormData(); form.append('file', file.value); form.append('name', batchName.value || file.value.name.replace(/\.[^.]+$/, ''));
-    form.append('tables', JSON.stringify(selectedTables.value.map((table) => ({ ...table, codeTypes: codeTypes.value[table.id] ?? {} }))));
+    form.append('tables', JSON.stringify(selectedTables.value.map((table) => {
+        const chosen = { ...table, codeTypes: codeTypes.value[table.id] ?? {} };
+        if (!table.legacyFormat) chosen.labelTemplate = draftTemplates.value[table.id] ?? null;
+        return chosen;
+    })));
     try {
         const result = await request('/api/batches', { method: 'POST', body: form });
         await refreshBatches();
@@ -114,7 +124,7 @@ async function upload() {
         success.value = { name: batchName.value || file.value.name.replace(/\.[^.]+$/, ''), filename: saved.original_filename, count: result.batches.reduce((total, batch) => total + batch.row_count, 0), batchCount: result.batches.length };
         file.value = null;
         batchName.value = '';
-        analysis.value = null; selectedTableIds.value = []; codeTypes.value = {};
+        analysis.value = null; selectedTableIds.value = []; codeTypes.value = {}; draftTemplates.value = {};
         if (fileInput.value) fileInput.value.value = '';
         activePage.value = 'history';
     } catch (exception) { error.value = exception.message; }
@@ -127,13 +137,15 @@ async function analyzeWorkbook() {
     try {
         analysis.value = await request('/api/analyze', { method: 'POST', body: form });
         selectRecommendedTables();
+        draftTemplates.value = {};
+        if (selectedTables.value.length && selectedTables.value.every((table) => table.legacyFormat)) await upload();
     } catch (exception) { error.value = exception.message; }
     finally { analyzing.value = false; }
 }
 function onFileChange(event) {
     error.value = '';
     success.value = null;
-    analysis.value = null; selectedTableIds.value = []; codeTypes.value = {};
+    analysis.value = null; selectedTableIds.value = []; codeTypes.value = {}; draftTemplates.value = {};
     file.value = event.target.files?.[0] ?? null;
     if (file.value && file.value.size > 4 * 1024 * 1024) {
         error.value = 'This file is larger than 4 MB. Choose a smaller Excel file.';
@@ -145,7 +157,7 @@ function clearFile(input) {
     file.value = null;
     error.value = '';
     success.value = null;
-    analysis.value = null; selectedTableIds.value = []; codeTypes.value = {};
+    analysis.value = null; selectedTableIds.value = []; codeTypes.value = {}; draftTemplates.value = {};
     if (input) input.value = '';
 }
 async function openBatch(id) {
@@ -160,32 +172,15 @@ function toggleBatch(id) {
     openBatch(id);
 }
 function selectRecord(record) { selectedRecord.value = record; }
-function makeDefaultTemplate() {
-    const defs = [
-        ['text','partNumber','PART NO.',12,12,190,24,15], ['text','partNumber','',205,22,340,45,40], ['qr','qrCode','',620,10,125,125,18],
-        ['text','quantity','QUANTITY',12,158,160,24,17], ['text','quantity','',35,192,220,47,34],
-        ['text','partName','PARTS DESCRIPTION',275,158,240,24,16], ['text','partName','',285,188,240,44,20],
-        ['text','modelName','MODEL NAME',545,158,200,24,16], ['text','modelName','',550,188,190,44,20],
-        ['text','cartonWeight','CARTON WEIGHT (Kg)',275,230,240,24,15], ['text','cartonWeight','',300,258,210,34,20],
-        ['text','supplierNumber','SUPPLIER NUMBER',12,298,235,24,15], ['text','supplierNumber','',35,332,220,35,20],
-        ['text','mfgDate','MFG DATE',275,298,240,24,15], ['text','mfgDate','',300,332,210,35,20],
-        ['text','supplierPn','SUPPLIER PN',545,298,200,24,15], ['text','supplierPn','',550,332,190,35,20],
-        ['text','serialNo','SERIAL NO.',12,410,240,24,16], ['text','serialNo','',80,435,360,38,20], ['text','serialCode','',40,478,400,44,17],
-    ];
-    const elements = defs.map(([type,field,label,x,y,w,h,fontSize],index) => ({ id:`el-${Date.now()}-${index}`, type, field, label, x,y,w,h,fontSize }));
-    const configured = selectedRecord.value?.data?.customFields ?? [];
-    const builtInCodes = new Set(['QR CODE', 'SERIAL CODE', 'QUANTITY CODE', 'PART NUMBER CODE', 'SUPPLIER CODE']);
-    for (const item of configured) {
-        if (builtInCodes.has(item.name.trim().toUpperCase())) continue;
-        const type = selectedBatch.value?.field_config?.[item.name];
-        if (!['qr','barcode'].includes(type)) continue;
-        const index = elements.length;
-        elements.push({ id:`el-${Date.now()}-${index}`, type, field:item.name, label:'', x:20 + (index % 3) * 235, y:15 + Math.floor(index / 3) * 115, w:type === 'qr' ? 110 : 210, h:type === 'qr' ? 110 : 54, fontSize:18 });
-    }
-    return elements;
-}
 function openEditor() {
-    templateElements.value = structuredClone(selectedBatch.value?.label_template?.elements ?? makeDefaultTemplate());
+    draftDesignMode.value = false;
+    templateElements.value = structuredClone(selectedBatch.value?.label_template?.elements ?? []);
+    templateMessage.value = ''; templateError.value = ''; editorOpen.value = true;
+}
+function startDesign() {
+    draftDesignMode.value = true;
+    designTableIndex.value = 0;
+    templateElements.value = structuredClone(draftTemplates.value[designTables.value[0]?.id]?.elements ?? []);
     templateMessage.value = ''; templateError.value = ''; editorOpen.value = true;
 }
 function addCanvasElement(type, field = '') {
@@ -204,6 +199,21 @@ function canvasDrop(event) {
     const added = templateElements.value.at(-1); added.x = x; added.y = y;
 }
 async function saveTemplate() {
+    if (draftDesignMode.value) {
+        templateError.value = '';
+        if (!designTable.value || !templateElements.value.length) { templateError.value = 'Add at least one text, barcode, QR code, or border element to the canvas.'; return; }
+        draftTemplates.value[designTable.value.id] = { elements: structuredClone(templateElements.value) };
+        if (designTableIndex.value + 1 < designTables.value.length) {
+            designTableIndex.value += 1;
+            templateElements.value = structuredClone(draftTemplates.value[designTables.value[designTableIndex.value]?.id]?.elements ?? []);
+            templateMessage.value = '';
+            return;
+        }
+        editorOpen.value = false;
+        draftDesignMode.value = false;
+        await upload();
+        return;
+    }
     if (!selectedBatch.value) return;
     templateSaving.value = true; templateError.value = ''; templateMessage.value = '';
     try {
@@ -363,27 +373,30 @@ onMounted(async () => {
               <input ref="fileInput" class="sr-only" type="file" accept=".xlsx,.xlsm,.xls,.csv" @click="fileInput.value = ''" @change="onFileChange" />
             </label>
           </div>
-          <button v-if="file && !analysis" :disabled="analyzing" @click="analyzeWorkbook" class="mt-4 rounded-lg border border-blue-300 bg-blue-50 px-4 py-2.5 font-semibold text-blue-800 disabled:opacity-50">{{ analyzing ? 'Analyzing workbook…' : 'Analyze workbook' }}</button>
+          <button v-if="file && !analysis" :disabled="analyzing" @click="analyzeWorkbook" class="mt-4 rounded-lg border border-blue-300 bg-blue-50 px-4 py-2.5 font-semibold text-blue-800 disabled:opacity-50">{{ analyzing ? 'Analyzing workbook…' : 'Upload & analyze Excel' }}</button>
           <div v-if="analysis" class="mt-4 space-y-4 rounded-xl border border-blue-100 bg-blue-50/60 p-4">
-            <div class="flex flex-wrap items-center gap-2"><div class="mr-auto"><h3 class="font-bold">Workbook analysis</h3><p class="mt-1 text-sm text-slate-600">Found {{ analysis.sheets.length }} worksheet(s) and {{ analysis.tables.length }} table section(s). Each selected table becomes its own history folder and canvas.</p></div><button @click="selectAllTables" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold">Select all</button><button @click="selectNoTables" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold">Clear</button></div>
+            <div class="flex flex-wrap items-center gap-2"><div class="mr-auto"><h3 class="font-bold">Workbook analysis</h3><p class="mt-1 text-sm text-slate-600">Found {{ analysis.sheets.length }} worksheet(s) and {{ analysis.tables.length }} table section(s). Standard Ogami files generate labels automatically; other formats open a blank design canvas for each selected table.</p></div><button @click="selectAllTables" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold">Select all</button><button @click="selectNoTables" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold">Clear</button></div>
             <p v-if="!analysis.tables.length" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">No table with a header and data rows was detected. Check that the table has column names in its first row.</p>
             <div v-else class="max-h-[520px] space-y-3 overflow-auto pr-1">
               <article v-for="table in analysis.tables" :key="table.id" class="rounded-xl border bg-white p-3" :class="selectedTableIds.includes(table.id)?'border-blue-400 ring-1 ring-blue-200':'border-slate-200'">
                 <label class="flex cursor-pointer items-start gap-3"><input v-model="selectedTableIds" type="checkbox" :value="table.id" class="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"><span class="min-w-0 flex-1"><b class="block">{{ table.sheetName }} · {{ table.tableName }}</b><small class="block text-slate-500">{{ table.rowCount }} data rows · header row {{ table.headerRow }} · {{ table.headers.join(' · ') }}</small><small v-if="table.selectionNote" class="mt-1 block text-amber-700">{{ table.selectionNote }}</small></span></label>
                 <details class="ml-7 mt-2"><summary class="cursor-pointer text-xs font-medium text-blue-700">Preview detected rows</summary><div class="mt-2 overflow-x-auto rounded border border-slate-200"><table class="min-w-full text-left text-xs"><thead class="bg-slate-100"><tr><th v-for="(header,index) in table.headers" :key="index" class="whitespace-nowrap px-2 py-1.5">{{ header }}</th></tr></thead><tbody><tr v-for="(row,index) in table.sample" :key="index"><td v-for="(value,col) in row" :key="col" class="max-w-40 truncate border-t border-slate-100 px-2 py-1.5">{{ value }}</td></tr></tbody></table></div></details>
                 <div v-if="selectedTableIds.includes(table.id)&&table.codeColumns.length" class="ml-7 mt-3 space-y-2 rounded-lg bg-slate-50 p-3"><div><b class="text-xs">How should these codes appear on this canvas?</b><p class="text-xs text-slate-500">Your choice applies to this table only.</p></div><label v-for="column in table.codeColumns" :key="column.header" class="flex flex-wrap items-center justify-between gap-2 text-xs"><span>{{ column.header }} <small v-if="column.suggestedType" class="text-slate-500">· suggested {{ column.suggestedType === 'qr' ? 'QR code' : 'barcode' }}</small></span><select v-model="codeTypes[table.id][column.header]" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5"><option value="">Choose…</option><option value="barcode">Barcode</option><option value="qr">QR code</option><option value="text">Text only</option><option value="ignore">Do not show</option></select></label></div>
-                <p v-if="selectedTableIds.includes(table.id)" class="ml-7 mt-2 text-xs text-slate-500">Other columns stay available as variables in this table’s design editor.</p>
+                <p v-if="selectedTableIds.includes(table.id)" class="ml-7 mt-2 text-xs text-slate-500">All columns can be added as variables on this table’s canvas.</p>
               </article>
             </div>
           </div>
           <label class="mt-4 block text-sm font-medium">Workbook / folder name<input v-model="batchName" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" placeholder="Excel 1" /></label>
-          <button :disabled="!file||!selectedTables.length||selectedTables.some((table)=>table.codeColumns.some((column)=>!codeTypes[table.id]?.[column.header]))||loading" @click="upload" class="mt-4 flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+          <button v-if="analysis && selectedTables.some((table)=>!table.legacyFormat)" :disabled="!file||!selectedTables.length||selectedTables.some((table)=>table.codeColumns.some((column)=>!codeTypes[table.id]?.[column.header]))||loading" @click="startDesign" class="mt-4 flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+            {{ loading?'Preparing…':'Edit label design' }}
+          </button>
+          <button v-else-if="analysis && selectedTables.length" :disabled="!file||!selectedTables.length||selectedTables.some((table)=>table.codeColumns.some((column)=>!codeTypes[table.id]?.[column.header]))||loading" @click="upload" class="mt-4 flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
             <span v-if="loading" class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
             {{ loading?'Uploading and generating labels…':'Upload and generate labels' }}
           </button>
           <p v-if="loading" role="status" class="mt-3 text-sm text-blue-700">Uploading and validating your file. Keep this page open; confirmation will appear once it has been saved.</p>
         </article>
-        <article class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-lg font-bold">Flexible import, accurate labels</h2><p class="mt-3 text-sm leading-6 text-slate-600">Analyze every worksheet and detected table section before importing. Known columns are matched automatically; unfamiliar columns are preserved as custom fields. Code-like columns can be configured as QR, barcode, text, or hidden. Every non-empty row generates a label, even if some values are blank. Original cell values are read directly and never guessed.</p><p class="mt-4 rounded-lg bg-slate-50 p-4 text-sm text-slate-600">Your table selection and code display choices are saved with the workbook for the label design editor.</p></article>
+        <article class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-lg font-bold">Upload → Design → Records</h2><p class="mt-3 text-sm leading-6 text-slate-600">The familiar Ogami spreadsheet format goes straight to History with the original label layout. For a different format, choose which detected tables to use, select barcode or QR for code columns, then build a label from a blank canvas. Each selected table gets its own design.</p><p class="mt-4 rounded-lg bg-slate-50 p-4 text-sm text-slate-600">Nothing is generated as a sample design. Add only the text, fields, barcodes, QR codes, and borders you want.</p></article>
       </section>
 
       <section v-if="activePage==='history'" class="space-y-4">
@@ -421,10 +434,10 @@ onMounted(async () => {
       </section>
     </main>
     <div v-if="editorOpen" class="fixed inset-0 z-40 flex flex-col bg-slate-100" role="dialog" aria-modal="true" aria-label="Label design editor">
-      <header class="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-5 py-3"><div class="mr-auto"><b class="text-lg">Label design editor</b><p class="text-xs text-slate-500">Drag a field onto the canvas. Select an item to change its field, size, or remove it.</p></div><span v-if="templateMessage" class="text-sm text-emerald-700">{{ templateMessage }}</span><span v-if="templateError" class="text-sm text-red-700">{{ templateError }}</span><button @click="saveTemplate" :disabled="templateSaving" class="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50">{{ templateSaving ? 'Saving…' : 'Save design' }}</button><button @click="editorOpen=false" class="rounded-lg border border-slate-300 px-4 py-2">Close</button></header>
+      <header class="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-5 py-3"><div class="mr-auto"><b class="text-lg">{{ draftDesignMode ? `Design ${designTableIndex + 1} of ${designTables.length} · ${designTable?.sheetName} / ${designTable?.tableName}` : 'Label design editor' }}</b><p class="text-xs text-slate-500">{{ draftDesignMode ? 'Start with a blank canvas. Add and arrange the fields, barcodes, QR codes, and borders you want.' : 'Drag a field onto the canvas. Select an item to change its field, size, or remove it.' }}</p></div><span v-if="templateMessage" class="text-sm text-emerald-700">{{ templateMessage }}</span><span v-if="templateError" class="text-sm text-red-700">{{ templateError }}</span><button @click="saveTemplate" :disabled="templateSaving" class="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50">{{ templateSaving ? 'Saving…' : (draftDesignMode ? (designTableIndex + 1 < designTables.length ? 'Save design & next table' : 'Create records') : 'Save design') }}</button><button @click="editorOpen=false; draftDesignMode=false" class="rounded-lg border border-slate-300 px-4 py-2">{{ draftDesignMode ? 'Cancel' : 'Close' }}</button></header>
       <div class="grid min-h-0 flex-1 lg:grid-cols-[270px_minmax(0,1fr)_300px]">
-        <aside class="overflow-auto border-r border-slate-200 bg-white p-4"><h3 class="mb-3 font-bold">Text fields</h3><div class="space-y-2"><button v-for="[field,label] in availableFields" :key="field" draggable="true" @dragstart="(event)=>{event.dataTransfer.setData('application/ogami-type','text');event.dataTransfer.setData('application/ogami-field',field)}" @click="addCanvasElement('text',field)" class="block w-full cursor-grab rounded-lg border border-slate-200 p-2 text-left text-sm hover:border-blue-400">{{ label }} <small class="block truncate text-slate-400">{{ field }}</small></button></div><h3 class="mb-2 mt-6 font-bold">Code fields</h3><div class="space-y-2"><template v-for="[field,label] in availableFields.filter(([field])=>/code|qr|barcode/i.test(field))" :key="field"><div class="rounded-lg border border-slate-200 p-2"><b class="block text-xs">{{ label }}</b><button draggable="true" @dragstart="(event)=>{event.dataTransfer.setData('application/ogami-type',codeTypeFor(field));event.dataTransfer.setData('application/ogami-field',field)}" @click="addCanvasElement(codeTypeFor(field),field)" class="mt-1 w-full rounded bg-slate-50 px-2 py-1 text-left text-xs hover:bg-blue-50">{{ codeTypeFor(field)==='qr' ? '▦ Add QR code' : '▥ Add barcode' }} <span v-if="selectedBatch?.field_config?.[field]" class="text-slate-500">· selected</span></button><div class="mt-1 flex gap-1"><button @click="addCanvasElement(codeTypeFor(field)==='qr'?'barcode':'qr',field)" class="text-[11px] text-blue-700 underline">Add as {{ codeTypeFor(field)==='qr'?'barcode':'QR code' }} instead</button></div></div></template></div><button @click="addCanvasElement('text')" class="mt-5 w-full rounded-lg bg-slate-100 p-2 text-sm font-semibold">+ Add static text</button></aside>
-        <section class="flex min-w-0 items-center justify-center overflow-auto p-5 lg:p-10" @dragover.prevent @drop.prevent="canvasDrop($event)"><div ref="canvasElement" class="relative aspect-[760/535] w-full max-w-[1100px] shrink-0 overflow-hidden bg-white shadow-xl ring-1 ring-slate-300" @dragover.prevent @drop.prevent.stop="canvasDrop($event)"><div class="pointer-events-none absolute inset-0 border-2 border-black"></div><div v-for="element in templateElements" :key="element.id" draggable="true" @dragstart="(event)=>{draggingElement=element;event.dataTransfer.setData('text/plain',element.id)}" class="absolute cursor-move overflow-hidden border border-dashed border-blue-300/80 bg-white/30 px-1 text-slate-900 hover:border-blue-600" :style="{left:`${element.x/760*100}%`,top:`${element.y/535*100}%`,width:`${element.w/760*100}%`,height:`${element.h/535*100}%`,fontSize:`${element.fontSize||20}px`}"><span v-if="element.type==='box'" class="block h-full w-full border border-slate-800"></span><span v-else-if="element.type==='qr'" class="grid h-full place-items-center bg-slate-100 text-4xl">▦</span><span v-else-if="element.type==='barcode'" class="grid h-full place-items-center bg-white text-3xl tracking-widest">▥ ▥ ▥</span><span v-else class="block truncate">{{ element.label || elementValue(element) || (element.field ? `[${element.field}]` : 'Text') }}</span></div></div></section>
+        <aside class="overflow-auto border-r border-slate-200 bg-white p-4"><h3 class="mb-3 font-bold">Fields</h3><div class="space-y-2"><div v-for="[field,label] in availableFields" :key="field" class="rounded-lg border border-slate-200 p-2"><button draggable="true" @dragstart="(event)=>{event.dataTransfer.setData('application/ogami-type','text');event.dataTransfer.setData('application/ogami-field',field)}" @click="addCanvasElement('text',field)" class="block w-full cursor-grab text-left text-sm hover:text-blue-700">{{ label }} <small class="block truncate text-slate-400">{{ field }}</small></button><div class="mt-2 flex gap-3 text-[11px]"><button @click="addCanvasElement('barcode',field)" class="text-blue-700 underline">Add barcode</button><button @click="addCanvasElement('qr',field)" class="text-blue-700 underline">Add QR</button></div></div></div><button @click="addCanvasElement('text')" class="mt-5 w-full rounded-lg bg-slate-100 p-2 text-sm font-semibold">+ Add static text</button><button @click="addCanvasElement('box')" class="mt-2 w-full rounded-lg border border-slate-200 p-2 text-sm font-semibold">+ Add border</button></aside>
+        <section class="flex min-w-0 items-center justify-center overflow-auto p-5 lg:p-10" @dragover.prevent @drop.prevent="canvasDrop($event)"><div ref="canvasElement" class="relative aspect-[760/535] w-full max-w-[1100px] shrink-0 overflow-hidden bg-white shadow-xl ring-1 ring-slate-300" @dragover.prevent @drop.prevent.stop="canvasDrop($event)"><div class="pointer-events-none absolute inset-0 border-2 border-dashed border-slate-300"></div><div v-for="element in templateElements" :key="element.id" draggable="true" @dragstart="(event)=>{draggingElement=element;event.dataTransfer.setData('text/plain',element.id)}" class="absolute cursor-move overflow-hidden border border-dashed border-blue-300/80 bg-white/30 px-1 text-slate-900 hover:border-blue-600" :style="{left:`${element.x/760*100}%`,top:`${element.y/535*100}%`,width:`${element.w/760*100}%`,height:`${element.h/535*100}%`,fontSize:`${element.fontSize||20}px`}"><span v-if="element.type==='box'" class="block h-full w-full border border-slate-800"></span><span v-else-if="element.type==='qr'" class="grid h-full place-items-center bg-slate-100 text-4xl">▦</span><span v-else-if="element.type==='barcode'" class="grid h-full place-items-center bg-white text-3xl tracking-widest">▥ ▥ ▥</span><span v-else class="block truncate">{{ element.label || elementValue(element) || (element.field ? `[${element.field}]` : 'Text') }}</span></div></div></section>
         <aside class="overflow-auto border-l border-slate-200 bg-white p-4"><h3 class="font-bold">Design elements</h3><p class="mt-1 text-xs text-slate-500">Drag items on the canvas to move them. Adjust position and size below.</p><div class="mt-4 space-y-3"><div v-for="element in templateElements" :key="element.id" class="rounded-xl border border-slate-200 p-3"><div class="mb-2 flex items-center justify-between"><b class="text-sm">{{ element.type==='text' ? 'Text' : element.type==='qr' ? 'QR code' : element.type==='box' ? 'Border' : 'Barcode' }}</b><button @click="templateElements=templateElements.filter(item=>item.id!==element.id)" class="text-xs text-red-600">Remove</button></div><select v-if="(element.type==='qr'||element.type==='barcode'||(element.type==='text'&&element.field))" v-model="element.field" class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"><option v-for="[field,label] in availableFields" :key="field" :value="field">{{ label }}</option></select><input v-if="element.type==='text'" v-model="element.label" placeholder="Optional label" class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"><div class="grid grid-cols-2 gap-2"><label v-for="key in ['x','y','w','h']" :key="key" class="text-xs capitalize text-slate-500">{{ key }}<input v-model.number="element[key]" type="number" min="0" max="760" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label></div><label v-if="element.type==='text'" class="mt-2 block text-xs text-slate-500">Font size<input v-model.number="element.fontSize" type="number" min="8" max="64" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label></div><p v-if="!templateElements.length" class="mt-4 text-sm text-slate-500">Drag fields from the left panel.</p></div></aside>
       </div>
     </div>

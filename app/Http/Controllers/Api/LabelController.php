@@ -72,7 +72,7 @@ class LabelController extends Controller
             $elements = $batch->label_template['elements'];
             $svg = ['<svg xmlns="http://www.w3.org/2000/svg" width="152mm" height="107mm" viewBox="0 0 760 535"><defs>'];
             foreach ($elements as $index => $element) $svg[] = sprintf('<clipPath id="element-clip-%d"><rect x="%s" y="%s" width="%s" height="%s"/></clipPath>', $index, max(0,(float)($element['x']??0)), max(0,(float)($element['y']??0)), max(20,(float)($element['w']??200)), max(20,(float)($element['h']??40)));
-            $svg[] = '</defs><rect x="1" y="1" width="758" height="533" fill="white" stroke="#111" stroke-width="2"/>';
+            $svg[] = '</defs>';
             foreach ($elements as $elementIndex => $element) {
                 $x = max(0, min(760, (float) ($element['x'] ?? 0)));
                 $y = max(0, min(535, (float) ($element['y'] ?? 0)));

@@ -133,6 +133,7 @@ class WorkbookImporter
                         'endColumn' => $endColumn,
                         'endRow' => $lastSegmentRow,
                         'headers' => array_map(fn ($column) => $headers[$column] !== '' ? $headers[$column] : "Column {$column}", range($startColumn, $endColumn)),
+                        'legacyFormat' => $this->isLegacyFormat($groupHeaders),
                         'sample' => $sample,
                         'codeColumns' => array_values(array_map(function ($header) {
                             $normalized = $this->normalize($header);
@@ -233,6 +234,27 @@ class WorkbookImporter
             'unmappedHeaders' => array_values(array_filter($headers, fn ($header) => !isset($mappedHeaders[$header]))),
             'rows' => $rows,
         ];
+    }
+
+    public function isLegacyFormat(array $headers): bool
+    {
+        $normalized = array_map(fn ($header) => $this->normalize((string) $header), $headers);
+        $requiredGroups = [
+            ['PARTNUMBER', 'PARTNUMBER1', 'PARTNO'],
+            ['PARTNAME', 'PARTSDESCRIPTION', 'DESCRIPTION'],
+            ['QUANTITY', 'QTY'],
+            ['MODELNAME', 'MODEL'],
+            ['CARTONWEIGHT', 'CARTONWEIGHTKG', 'WEIGHT'],
+            ['SUPPLIERNUMBER', 'SUPPLIERNO', 'VENDORNUMBER'],
+            ['MFGDATE', 'MANUFACTURINGDATE'],
+            ['SERIALNO', 'SERIALNUMBER'],
+        ];
+
+        foreach ($requiredGroups as $aliases) {
+            if (!array_intersect($aliases, $normalized)) return false;
+        }
+
+        return (bool) array_intersect(['SERIALCODE', 'QUANTITYCODE', 'PARTNUMBERCODE', 'SUPPLIERCODE', 'QRCODE'], $normalized);
     }
 
     private function normalize(string $value): string

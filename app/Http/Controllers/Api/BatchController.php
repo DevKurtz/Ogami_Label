@@ -46,7 +46,7 @@ class BatchController extends Controller
         $ownedBatch = $request->user()->batches()->whereKey($batch->getKey())->firstOrFail();
         $validated = $request->validate([
             'template' => ['required', 'array'],
-            'template.elements' => ['required', 'array', 'max:80'],
+            'template.elements' => ['required', 'array', 'min:1', 'max:80'],
             'template.elements.*.id' => ['required', 'string', 'max:80'],
             'template.elements.*.type' => ['required', Rule::in(['text', 'barcode', 'qr', 'box'])],
             'template.elements.*.field' => ['nullable', 'string', 'max:160'],
@@ -117,9 +117,25 @@ class BatchController extends Controller
                     'endRow' => ['required', 'integer', 'min:2'],
                     'codeTypes' => ['present', 'array'],
                     'codeTypes.*' => [Rule::in(['qr', 'barcode', 'text', 'ignore'])],
+                    'labelTemplate' => ['nullable', 'array'],
+                    'labelTemplate.elements' => ['required_with:labelTemplate', 'array', 'min:1', 'max:80'],
+                    'labelTemplate.elements.*.id' => ['required_with:labelTemplate', 'string', 'max:80'],
+                    'labelTemplate.elements.*.type' => ['required_with:labelTemplate', Rule::in(['text', 'barcode', 'qr', 'box'])],
+                    'labelTemplate.elements.*.field' => ['nullable', 'string', 'max:160'],
+                    'labelTemplate.elements.*.label' => ['nullable', 'string', 'max:160'],
+                    'labelTemplate.elements.*.x' => ['required_with:labelTemplate', 'numeric', 'min:0', 'max:760'],
+                    'labelTemplate.elements.*.y' => ['required_with:labelTemplate', 'numeric', 'min:0', 'max:535'],
+                    'labelTemplate.elements.*.w' => ['required_with:labelTemplate', 'numeric', 'min:20', 'max:760'],
+                    'labelTemplate.elements.*.h' => ['required_with:labelTemplate', 'numeric', 'min:20', 'max:535'],
+                    'labelTemplate.elements.*.fontSize' => ['nullable', 'integer', 'min:8', 'max:64'],
                 ])->validate();
                 if (isset($imports[$table['id']])) throw new RuntimeException('A table was selected more than once.');
-                $imports[$table['id']] = ['table' => $table, 'data' => $importer->import($validated['file']->getRealPath(), $table)];
+                $imported = $importer->import($validated['file']->getRealPath(), $table);
+                $legacyFormat = $importer->isLegacyFormat($imported['headers']);
+                if (!$legacyFormat && empty($table['labelTemplate']['elements'])) {
+                    throw new RuntimeException("Create a label design for “{$table['sheetName']} · {$table['tableName']}” before generating records.");
+                }
+                $imports[$table['id']] = ['table' => $table, 'data' => $imported, 'legacyFormat' => $legacyFormat];
             }
         } catch (ValidationException $exception) {
             throw $exception;
@@ -133,15 +149,14 @@ class BatchController extends Controller
         $batches = DB::transaction(function () use ($request, $validated, $imports, $baseName) {
             $created = [];
             $multiple = count($imports) > 1;
-            foreach ($imports as ['table' => $table, 'data' => $imported]) {
+            foreach ($imports as ['table' => $table, 'data' => $imported, 'legacyFormat' => $legacyFormat]) {
                 $folderName = $multiple ? $baseName.' · '.$table['sheetName'].' · '.$table['tableName'] : $baseName;
-                $template = $this->suggestedTemplate($imported, $table['codeTypes']);
                 $batch = $request->user()->batches()->create([
                     'name' => Str::limit($folderName, 160, ''),
                     'original_filename' => $validated['file']->getClientOriginalName(),
                     'row_count' => count($imported['rows']),
                     'field_config' => $table['codeTypes'],
-                    'label_template' => $template,
+                    'label_template' => $legacyFormat ? null : $table['labelTemplate'],
                 ]);
                 foreach ($imported['rows'] as $entry) {
                     $data = $entry['data'];
@@ -166,38 +181,4 @@ class BatchController extends Controller
         return response()->json(['batches' => $batches], 201);
     }
 
-    private function suggestedTemplate(array $imported, array $codeTypes): ?array
-    {
-        if (!$imported['unmappedHeaders']) return null;
-
-        $headers = array_values(array_unique(array_filter($imported['headers'], fn ($header) => trim($header) !== '')));
-        $count = count($headers);
-        if ($count === 0 || $count > 20) return null;
-        $columns = $count <= 2 ? $count : ($count <= 8 ? 2 : 3);
-        $rows = (int) ceil($count / $columns);
-        $cellWidth = 760 / $columns;
-        $cellHeight = 535 / $rows;
-        $elements = [];
-
-        foreach ($headers as $index => $header) {
-            $column = $index % $columns;
-            $row = intdiv($index, $columns);
-            $x = $column * $cellWidth + 6;
-            $y = $row * $cellHeight + 6;
-            $w = $cellWidth - 12;
-            $h = $cellHeight - 12;
-            $elements[] = ['id' => 'box-'.$index, 'type' => 'box', 'field' => '', 'label' => '', 'x' => $x, 'y' => $y, 'w' => $w, 'h' => $h, 'fontSize' => 18];
-            $elements[] = ['id' => 'heading-'.$index, 'type' => 'text', 'field' => '', 'label' => $header, 'x' => $x + 10, 'y' => $y + 8, 'w' => $w - 20, 'h' => 28, 'fontSize' => 17];
-            $type = $codeTypes[$header] ?? 'text';
-            if (in_array($type, ['qr', 'barcode'], true)) {
-                $codeSize = $type === 'qr' ? min($w - 36, $h - 52) : $w - 36;
-                $codeHeight = $type === 'qr' ? $codeSize : min(66, $h - 54);
-                $elements[] = ['id' => 'value-'.$index, 'type' => $type, 'field' => $header, 'label' => '', 'x' => $x + ($w - $codeSize) / 2, 'y' => $y + 42, 'w' => $codeSize, 'h' => $codeHeight, 'fontSize' => 16];
-            } elseif ($type === 'text') {
-                $elements[] = ['id' => 'value-'.$index, 'type' => 'text', 'field' => $header, 'label' => '', 'x' => $x + 10, 'y' => $y + 45, 'w' => $w - 20, 'h' => $h - 55, 'fontSize' => 21];
-            }
-        }
-
-        return ['elements' => $elements];
-    }
 }
