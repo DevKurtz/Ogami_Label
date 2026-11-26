@@ -3,11 +3,13 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\LabelRecord;
 use App\Models\WorkbookBatch;
 use App\Services\WorkbookImporter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
 
@@ -21,6 +23,45 @@ class BatchController extends Controller
     public function show(WorkbookBatch $batch): JsonResponse
     {
         return response()->json($batch->load(['records' => fn ($query) => $query->orderBy('row_number')]));
+    }
+
+    public function deleteStatus(Request $request): JsonResponse
+    {
+        return response()->json(['enabled' => $this->isWorkspaceAdmin($request)]);
+    }
+
+    public function destroy(Request $request, WorkbookBatch $batch): JsonResponse
+    {
+        $this->authorizeDelete($request);
+        $batch->delete();
+
+        return response()->json(['message' => 'Workbook folder and its label records were deleted.']);
+    }
+
+    public function destroyRecord(Request $request, LabelRecord $record): JsonResponse
+    {
+        $this->authorizeDelete($request);
+        $batch = $record->batch;
+
+        DB::transaction(function () use ($record, $batch) {
+            $record->delete();
+            $batch->row_count = $batch->records()->count();
+            $batch->save();
+        });
+
+        return response()->json(['message' => 'Label record deleted.', 'batch_id' => $batch->id]);
+    }
+
+    private function authorizeDelete(Request $request): void
+    {
+        abort_unless($this->isWorkspaceAdmin($request), 403, 'Only the configured workspace administrator can delete records.');
+    }
+
+    private function isWorkspaceAdmin(Request $request): bool
+    {
+        $adminEmail = Str::lower(trim((string) config('services.ogami.admin_email', '')));
+
+        return $adminEmail !== '' && Str::lower((string) $request->user()?->email) === $adminEmail;
     }
 
     public function store(Request $request, WorkbookImporter $importer): JsonResponse
@@ -50,11 +91,11 @@ class BatchController extends Controller
                     'row_number' => $entry['row_number'],
                     'serial_no' => $data['serialNo'] ?? null,
                     'part_number' => $data['partNumber'] ?? null,
-                    'qr_code' => $data['qrCode'],
-                    'serial_code' => $data['serialCode'],
-                    'quantity_code' => $data['quantityCode'],
-                    'part_number_code' => $data['partNumberCode'],
-                    'supplier_code' => $data['supplierCode'],
+                    'qr_code' => $data['qrCode'] ?? '',
+                    'serial_code' => $data['serialCode'] ?? '',
+                    'quantity_code' => $data['quantityCode'] ?? '',
+                    'part_number_code' => $data['partNumberCode'] ?? '',
+                    'supplier_code' => $data['supplierCode'] ?? '',
                     'data' => $data,
                 ]);
             }

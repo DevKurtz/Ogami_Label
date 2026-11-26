@@ -9,16 +9,35 @@ use RuntimeException;
 
 class WorkbookImporter
 {
+    private const FIELD_LABELS = [
+        'serialNumber' => 'serial number',
+        'partNumber' => 'part number',
+        'supplierPn' => 'supplier part number',
+        'partName' => 'part name',
+        'quantity' => 'quantity',
+        'modelName' => 'model name',
+        'cartonWeight' => 'carton weight',
+        'supplierNumber' => 'supplier number',
+        'mfgDate' => 'manufacturing date',
+        'serialNo' => 'serial number',
+        'dateCode' => 'date code',
+        'serialCode' => 'serial code',
+        'quantityCode' => 'quantity code',
+        'partNumberCode' => 'part number code',
+        'supplierCode' => 'supplier code',
+        'qrCode' => 'QR code',
+    ];
+
     private const FIELDS = [
         'serialNumber' => ['SERIAL NUMBER'],
-        'partNumber' => ['PART NUMBER①', 'PART NUMBER1', 'PART NUMBER 1'],
-        'supplierPn' => ['PART NUMBER②', 'PART NUMBER2', 'PART NUMBER 2'],
-        'partName' => ['PART NAME'],
-        'quantity' => ['QUANTITY'],
-        'modelName' => ['MODEL NAME'],
-        'cartonWeight' => ['CARTON WEIGHT'],
-        'supplierNumber' => ['SUPPLIER NUMBER'],
-        'mfgDate' => ['MFG. DATE', 'MFG DATE'],
+        'partNumber' => ['PART NUMBER①', 'PART NUMBER1', 'PART NUMBER 1', 'PART NO.', 'PART NO'],
+        'supplierPn' => ['PART NUMBER②', 'PART NUMBER2', 'PART NUMBER 2', 'SUPPLIER PART NUMBER', 'SUPPLIER PN'],
+        'partName' => ['PART NAME', 'PARTS DESCRIPTION', 'DESCRIPTION'],
+        'quantity' => ['QUANTITY', 'QTY'],
+        'modelName' => ['MODEL NAME', 'MODEL'],
+        'cartonWeight' => ['CARTON WEIGHT', 'CARTON WEIGHT (KG)', 'WEIGHT'],
+        'supplierNumber' => ['SUPPLIER NUMBER', 'SUPPLIER NO.', 'VENDOR NUMBER'],
+        'mfgDate' => ['MFG. DATE', 'MFG DATE', 'MANUFACTURING DATE'],
         'serialNo' => ['SERIAL NO.', 'SERIAL NO'],
         'dateCode' => ['DATECODE', 'DATE CODE'],
         'serialCode' => ['SERIAL CODE'],
@@ -49,17 +68,10 @@ class WorkbookImporter
             }
         }
 
-        $required = ['partNumber', 'partName', 'quantity', 'cartonWeight', 'modelName', 'supplierNumber', 'mfgDate', 'serialNo', 'serialCode', 'quantityCode', 'partNumberCode', 'supplierCode', 'qrCode'];
-        $missing = array_values(array_diff($required, array_keys($indices)));
-        if ($missing) {
-            throw new RuntimeException('Missing required Excel columns: '.implode(', ', $missing));
-        }
-
         $rows = [];
-        $serials = [];
         $errors = [];
         for ($rowNumber = 2; $rowNumber <= $lastRow; $rowNumber++) {
-            $row = [];
+            $row = array_fill_keys(array_keys(self::FIELDS), '');
             foreach ($indices as $key => $column) {
                 $cell = $sheet->getCell([$column, $rowNumber]);
                 $value = $cell->getFormattedValue();
@@ -67,7 +79,8 @@ class WorkbookImporter
                     && $cell->getDataType() === \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC) {
                     $numericDigits = preg_replace('/\D/', '', sprintf('%.0f', (float) $cell->getValue())) ?? '';
                     if (strlen(ltrim($numericDigits, '0')) > 15) {
-                        $errors[] = "Row {$rowNumber}: {$key} is stored as a number with more than 15 significant digits. Re-enter this code as Excel text to prevent precision loss.";
+                        $fieldLabel = self::FIELD_LABELS[$key] ?? $key;
+                        $errors[] = "Row {$rowNumber}: {$fieldLabel} is stored as a number with more than 15 significant digits. Re-enter it as Excel text to prevent precision loss.";
                     }
                 }
                 if ($key === 'mfgDate') {
@@ -79,26 +92,11 @@ class WorkbookImporter
                 continue;
             }
 
-            foreach (['partNumber', 'partName', 'quantity', 'cartonWeight', 'modelName', 'supplierNumber', 'mfgDate', 'serialNo', 'serialCode', 'quantityCode', 'partNumberCode', 'supplierCode', 'qrCode'] as $requiredField) {
-                if (($row[$requiredField] ?? '') === '') {
-                    $errors[] = "Row {$rowNumber}: {$requiredField} is blank.";
-                }
-            }
-            foreach (['serialCode', 'quantityCode', 'partNumberCode', 'supplierCode'] as $codeField) {
-                if (strlen($row[$codeField] ?? '') > 255 || preg_match('/[^\x20-\x7E]/', $row[$codeField] ?? '')) {
-                    $errors[] = "Row {$rowNumber}: {$codeField} cannot be encoded as Code 128.";
-                }
-            }
-            $serial = $row['serialNo'] ?? '';
-            if ($serial !== '' && isset($serials[$serial])) {
-                $errors[] = "Rows {$serials[$serial]} and {$rowNumber}: duplicate serial no. {$serial}.";
-            }
-            if ($serial !== '') $serials[$serial] = $rowNumber;
             $rows[] = ['row_number' => $rowNumber, 'data' => $row];
         }
 
         if (!$rows) throw new RuntimeException('No data rows were found in the first worksheet.');
-        if ($errors) throw new RuntimeException(implode(' ', array_slice($errors, 0, 12)));
+        if ($errors) throw new RuntimeException(implode("\n", array_slice($errors, 0, 12)));
 
         return ['headers' => $headers, 'rows' => $rows];
     }

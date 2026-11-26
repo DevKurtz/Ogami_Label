@@ -96,6 +96,7 @@ return [
 
         'stderr' => [
             'driver' => 'monolog',
+            'name' => 'ogami-label',
             'level' => env('LOG_LEVEL', 'debug'),
             'handler' => StreamHandler::class,
             'handler_with' => [
