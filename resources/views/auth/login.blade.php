@@ -4,12 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Sign in · Ogami Label Studio</title>
+    <link rel="icon" type="image/svg+xml" href="/ogami-mark.svg">
     @vite(['resources/css/app.css'])
 </head>
 <body class="min-h-screen bg-slate-100 text-slate-900">
     <main class="mx-auto flex min-h-screen max-w-md items-center px-5 py-12">
         <section class="w-full rounded-2xl border border-slate-200 bg-white p-8 shadow-sm">
-            <p class="text-lg font-extrabold">OGAMI <span class="text-blue-600">LABEL STUDIO</span></p>
+            <div class="flex items-center gap-3"><img src="/ogami-mark.svg" alt="" class="h-11 w-11"><p class="text-lg font-extrabold">OGAMI <span class="text-blue-600">LABEL STUDIO</span></p></div>
             <h1 class="mt-8 text-2xl font-bold">Sign in to continue</h1>
             <p class="mt-2 text-sm leading-6 text-slate-600">Use your Google account to upload workbooks and view label history.</p>
 

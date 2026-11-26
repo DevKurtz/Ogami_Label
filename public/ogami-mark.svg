@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <defs>
+    <linearGradient id="ogami-blue" x1="13" y1="7" x2="53" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0785C9"/>
+      <stop offset=".54" stop-color="#0753B8"/>
+      <stop offset="1" stop-color="#082A9C"/>
+    </linearGradient>
+    <radialGradient id="ogami-gloss" cx="0" cy="0" r="1" gradientTransform="matrix(41 0 0 41 21 16)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#fff" stop-opacity=".2"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <path fill="url(#ogami-blue)" d="M32 3.5c15.74 0 28.5 12.76 28.5 28.5S47.74 60.5 32 60.5 3.5 47.74 3.5 32 16.26 3.5 32 3.5Z"/>
+  <path fill="url(#ogami-gloss)" d="M32 3.5c15.74 0 28.5 12.76 28.5 28.5S47.74 60.5 32 60.5 3.5 47.74 3.5 32 16.26 3.5 32 3.5Z"/>
+  <path stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" d="M45.5 24.5A15.5 15.5 0 1 0 48 34H31"/>
+  <path fill="#fff" d="M48.25 7.25a8.25 8.25 0 1 0 8.5 13.25 9.5 9.5 0 0 1-8.5-13.25Z"/>
+</svg>

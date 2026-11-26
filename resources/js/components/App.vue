@@ -638,7 +638,7 @@ onBeforeUnmount(endCanvasInteraction);
   <div class="min-h-screen bg-slate-100 text-slate-900" @dragover.prevent @drop.prevent="editorOpen ? canvasDrop($event) : null">
     <header class="sticky top-0 z-10 border-b border-slate-200 bg-white">
       <div class="mx-auto flex h-16 max-w-7xl items-center gap-9 px-5">
-        <div class="whitespace-nowrap text-lg font-extrabold">OGAMI <span class="text-blue-600">LABEL STUDIO</span></div>
+        <div class="flex shrink-0 items-center gap-2 whitespace-nowrap text-lg font-extrabold"><img :src="'/ogami-mark.svg'" alt="" class="h-9 w-9"/><span>OGAMI <span class="text-blue-600">LABEL STUDIO</span></span></div>
         <nav class="flex h-full gap-2">
           <button v-for="page in ['upload','history']" :key="page" @click="activePage=page" class="border-b-2 px-4 capitalize" :class="activePage===page?'border-blue-600 font-bold text-blue-700':'border-transparent text-slate-500'">{{ page }}</button>
         </nav>
