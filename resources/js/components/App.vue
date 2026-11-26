@@ -1,7 +1,8 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
+import QRCode from 'qrcode';
 
 const toast = Swal.mixin({
     toast: true,
@@ -53,8 +54,8 @@ const selectedTableIds = ref([]);
 const codeTypes = ref({});
 const editorOpen = ref(false);
 const templateElements = ref([]);
-const draggingElement = ref(null);
 const canvasElement = ref(null);
+const qrPreviews = ref({});
 const templateSaving = ref(false);
 const templateMessage = ref('');
 const templateError = ref('');
@@ -123,6 +124,21 @@ const elementValue = (element) => {
     if (element.type === 'text' && !element.field) return element.label ?? '';
     return data[element.field] ?? data.customFields?.find((field) => field.name === element.field)?.value ?? '';
 };
+let qrPreviewRequest = 0;
+watch(
+    () => templateElements.value.filter((element) => element.type === 'qr').map((element) => ({ id: element.id, value: String(elementValue(element) ?? '') })),
+    async (codes) => {
+        const requestId = ++qrPreviewRequest;
+        const next = {};
+        await Promise.all(codes.map(async ({ id, value }) => {
+            if (!value.trim()) { next[id] = ''; return; }
+            try { next[id] = await QRCode.toDataURL(value, { errorCorrectionLevel: 'M', margin: 2, width: 360, color: { dark: '#000000', light: '#ffffff' } }); }
+            catch { next[id] = null; }
+        }));
+        if (requestId === qrPreviewRequest) qrPreviews.value = next;
+    },
+    { immediate: true },
+);
 async function request(url, options = {}) {
     const response = await fetch(url, { credentials: 'same-origin', ...options, headers: { Accept: 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '', ...options.headers } });
     const body = await response.json();
@@ -221,11 +237,52 @@ function canvasDrop(event) {
     const rect = canvasElement.value.getBoundingClientRect();
     const x = Math.max(0, Math.min(760, (event.clientX - rect.left) * 760 / rect.width));
     const y = Math.max(0, Math.min(535, (event.clientY - rect.top) * 535 / rect.height));
-    if (draggingElement.value) { draggingElement.value.x = x; draggingElement.value.y = y; draggingElement.value = null; return; }
     const type = event.dataTransfer.getData('application/ogami-type') || 'text';
     const field = event.dataTransfer.getData('application/ogami-field') || '';
     addCanvasElement(type, field);
-    const added = templateElements.value.at(-1); added.x = x; added.y = y;
+    const added = templateElements.value.at(-1);
+    added.x = Math.round(Math.min(760 - added.w, x));
+    added.y = Math.round(Math.min(535 - added.h, y));
+}
+let activeCanvasInteraction = null;
+function beginCanvasInteraction(event, element, mode) {
+    if (event.button !== 0 || !canvasElement.value) return;
+    event.preventDefault();
+    const bounds = canvasElement.value.getBoundingClientRect();
+    activeCanvasInteraction = {
+        element,
+        mode,
+        startX: event.clientX,
+        startY: event.clientY,
+        elementX: Number(element.x),
+        elementY: Number(element.y),
+        elementW: Number(element.w),
+        elementH: Number(element.h),
+        scaleX: bounds.width / 760,
+        scaleY: bounds.height / 535,
+    };
+    window.addEventListener('pointermove', moveCanvasInteraction);
+    window.addEventListener('pointerup', endCanvasInteraction);
+    window.addEventListener('pointercancel', endCanvasInteraction);
+}
+function moveCanvasInteraction(event) {
+    const active = activeCanvasInteraction;
+    if (!active) return;
+    const dx = (event.clientX - active.startX) / active.scaleX;
+    const dy = (event.clientY - active.startY) / active.scaleY;
+    if (active.mode === 'resize') {
+        active.element.w = Math.round(Math.max(20, Math.min(760 - active.elementX, active.elementW + dx)));
+        active.element.h = Math.round(Math.max(20, Math.min(535 - active.elementY, active.elementH + dy)));
+    } else {
+        active.element.x = Math.round(Math.max(0, Math.min(760 - active.elementW, active.elementX + dx)));
+        active.element.y = Math.round(Math.max(0, Math.min(535 - active.elementH, active.elementY + dy)));
+    }
+}
+function endCanvasInteraction() {
+    activeCanvasInteraction = null;
+    window.removeEventListener('pointermove', moveCanvasInteraction);
+    window.removeEventListener('pointerup', endCanvasInteraction);
+    window.removeEventListener('pointercancel', endCanvasInteraction);
 }
 async function saveTemplate() {
     if (draftDesignMode.value) {
@@ -359,6 +416,7 @@ onMounted(async () => {
     try { await refreshBatches(); } catch (exception) { error.value = exception.message; notify('error', 'Could not load History', exception.message); }
     try { deleteEnabled.value = (await request('/api/delete-status')).enabled; } catch { deleteEnabled.value = false; }
 });
+onBeforeUnmount(endCanvasInteraction);
 </script>
 
 <template>
@@ -472,9 +530,46 @@ onMounted(async () => {
     <div v-if="editorOpen" class="fixed inset-0 z-40 flex flex-col bg-slate-100" role="dialog" aria-modal="true" aria-label="Label design editor">
       <header class="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-5 py-3"><div class="mr-auto"><b class="text-lg">{{ draftDesignMode ? `Design ${designTableIndex + 1} of ${designTables.length} · ${designTable?.sheetName} / ${designTable?.tableName}` : 'Label design editor' }}</b><p class="text-xs text-slate-500">{{ draftDesignMode ? 'Start with a blank canvas. Add and arrange the fields, barcodes, QR codes, and borders you want.' : 'Drag a field onto the canvas. Select an item to change its field, size, or remove it.' }}</p></div><span v-if="templateMessage" class="text-sm text-emerald-700">{{ templateMessage }}</span><span v-if="templateError" class="text-sm text-red-700">{{ templateError }}</span><button @click="saveTemplate" :disabled="templateSaving" class="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50">{{ templateSaving ? 'Saving…' : (draftDesignMode ? (designTableIndex + 1 < designTables.length ? 'Save design & next table' : 'Create records') : 'Save design') }}</button><button @click="editorOpen=false; draftDesignMode=false" class="rounded-lg border border-slate-300 px-4 py-2">{{ draftDesignMode ? 'Cancel' : 'Close' }}</button></header>
       <div class="grid min-h-0 flex-1 lg:grid-cols-[270px_minmax(0,1fr)_300px]">
-        <aside class="overflow-auto border-r border-slate-200 bg-white p-4"><h3 class="mb-3 font-bold">Fields</h3><div class="space-y-2"><div v-for="[field,label] in availableFields" :key="field" class="rounded-lg border border-slate-200 p-2"><button draggable="true" @dragstart="(event)=>{event.dataTransfer.setData('application/ogami-type','text');event.dataTransfer.setData('application/ogami-field',field)}" @click="addCanvasElement('text',field)" class="block w-full cursor-grab text-left text-sm hover:text-blue-700">{{ label }} <small class="block truncate text-slate-400">{{ field }}</small></button><div class="mt-2 flex gap-3 text-[11px]"><button @click="addCanvasElement('barcode',field)" class="text-blue-700 underline">Add barcode</button><button @click="addCanvasElement('qr',field)" class="text-blue-700 underline">Add QR</button></div></div></div><button @click="addCanvasElement('text')" class="mt-5 w-full rounded-lg bg-slate-100 p-2 text-sm font-semibold">+ Add static text</button><button @click="addCanvasElement('box')" class="mt-2 w-full rounded-lg border border-slate-200 p-2 text-sm font-semibold">+ Add border</button></aside>
-        <section class="flex min-w-0 items-center justify-center overflow-auto p-5 lg:p-10" @dragover.prevent @drop.prevent="canvasDrop($event)"><div ref="canvasElement" class="relative aspect-[760/535] w-full max-w-[1100px] shrink-0 overflow-hidden bg-white shadow-xl ring-1 ring-slate-300" @dragover.prevent @drop.prevent.stop="canvasDrop($event)"><div class="pointer-events-none absolute inset-0 border-2 border-dashed border-slate-300"></div><div v-for="element in templateElements" :key="element.id" draggable="true" @dragstart="(event)=>{draggingElement=element;event.dataTransfer.setData('text/plain',element.id)}" class="absolute cursor-move overflow-hidden border border-dashed border-blue-300/80 bg-white/30 px-1 text-slate-900 hover:border-blue-600" :style="{left:`${element.x/760*100}%`,top:`${element.y/535*100}%`,width:`${element.w/760*100}%`,height:`${element.h/535*100}%`,fontSize:`${element.fontSize||20}px`}"><span v-if="element.type==='box'" class="block h-full w-full border border-slate-800"></span><span v-else-if="element.type==='qr'" class="grid h-full place-items-center bg-slate-100 text-4xl">▦</span><span v-else-if="element.type==='barcode'" class="grid h-full place-items-center bg-white text-3xl tracking-widest">▥ ▥ ▥</span><span v-else class="block truncate">{{ element.label || elementValue(element) || (element.field ? `[${element.field}]` : 'Text') }}</span></div></div></section>
-        <aside class="overflow-auto border-l border-slate-200 bg-white p-4"><h3 class="font-bold">Design elements</h3><p class="mt-1 text-xs text-slate-500">Drag items on the canvas to move them. Adjust position and size below.</p><div class="mt-4 space-y-3"><div v-for="element in templateElements" :key="element.id" class="rounded-xl border border-slate-200 p-3"><div class="mb-2 flex items-center justify-between"><b class="text-sm">{{ element.type==='text' ? 'Text' : element.type==='qr' ? 'QR code' : element.type==='box' ? 'Border' : 'Barcode' }}</b><button @click="templateElements=templateElements.filter(item=>item.id!==element.id)" class="text-xs text-red-600">Remove</button></div><select v-if="(element.type==='qr'||element.type==='barcode'||(element.type==='text'&&element.field))" v-model="element.field" class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"><option v-for="[field,label] in availableFields" :key="field" :value="field">{{ label }}</option></select><input v-if="element.type==='text'" v-model="element.label" placeholder="Optional label" class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"><div class="grid grid-cols-2 gap-2"><label v-for="key in ['x','y','w','h']" :key="key" class="text-xs capitalize text-slate-500">{{ key }}<input v-model.number="element[key]" type="number" min="0" max="760" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label></div><label v-if="element.type==='text'" class="mt-2 block text-xs text-slate-500">Font size<input v-model.number="element.fontSize" type="number" min="8" max="64" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label></div><p v-if="!templateElements.length" class="mt-4 text-sm text-slate-500">Drag fields from the left panel.</p></div></aside>
+        <aside class="overflow-auto border-r border-slate-200 bg-white p-4">
+          <h3 class="mb-2 font-bold">Fields</h3>
+          <p class="mb-4 text-xs leading-5 text-slate-500"><b>Text</b> prints readable characters. <b>QR code</b> creates a scannable square image containing the selected field’s value.</p>
+          <div class="space-y-2">
+            <div v-for="[field,label] in availableFields" :key="field" class="rounded-lg border border-slate-200 p-2">
+              <button draggable="true" @dragstart="(event)=>{event.dataTransfer.setData('application/ogami-type','text');event.dataTransfer.setData('application/ogami-field',field)}" @click="addCanvasElement('text',field)" class="block w-full cursor-grab text-left text-sm hover:text-blue-700">Add readable text <small class="block truncate text-slate-500">{{ label }}</small></button>
+              <div class="mt-2 flex gap-3 text-xs"><button @click="addCanvasElement('barcode',field)" class="font-medium text-blue-700 underline">Add barcode</button><button @click="addCanvasElement('qr',field)" class="font-medium text-blue-700 underline">Add scannable QR</button></div>
+            </div>
+          </div>
+          <button @click="addCanvasElement('text')" class="mt-5 w-full rounded-lg bg-slate-100 p-2 text-sm font-semibold">+ Add static text</button>
+          <button @click="addCanvasElement('box')" class="mt-2 w-full rounded-lg border border-slate-200 p-2 text-sm font-semibold">+ Add border</button>
+        </aside>
+        <section class="flex min-w-0 items-center justify-center overflow-auto p-5 lg:p-10" @dragover.prevent @drop.prevent="canvasDrop($event)">
+          <div ref="canvasElement" class="relative aspect-[760/535] w-full max-w-[1100px] shrink-0 overflow-hidden bg-white shadow-xl ring-1 ring-slate-300" @dragover.prevent @drop.prevent.stop="canvasDrop($event)">
+            <div class="pointer-events-none absolute inset-0 border-2 border-dashed border-slate-300"></div>
+            <div v-for="element in templateElements" :key="element.id" @pointerdown="beginCanvasInteraction($event,element,'move')" class="absolute cursor-move select-none overflow-hidden border border-dashed border-blue-300/80 px-1 text-slate-900 hover:border-blue-600" :class="element.type==='box'?'bg-transparent':'bg-white/30'" :style="{left:`${element.x/760*100}%`,top:`${element.y/535*100}%`,width:`${element.w/760*100}%`,height:`${element.h/535*100}%`,fontSize:`${element.fontSize||20}px`}">
+              <span v-if="element.type==='box'" class="pointer-events-none block h-full w-full border border-slate-800"></span>
+              <span v-else-if="element.type==='qr'" class="flex h-full w-full items-center justify-center bg-white p-1"><img v-if="qrPreviews[element.id]" :src="qrPreviews[element.id]" class="pointer-events-none block h-full w-full object-contain" alt="Scannable QR code preview"><span v-else class="px-2 text-center text-xs text-slate-500">{{ elementValue(element) ? 'QR preview unavailable for this value' : 'No value in the preview row' }}</span></span>
+              <span v-else-if="element.type==='barcode'" class="pointer-events-none grid h-full place-items-center bg-white text-3xl tracking-widest">▥ ▥ ▥</span>
+              <span v-else class="pointer-events-none block truncate">{{ element.label || elementValue(element) || (element.field ? `[${element.field}]` : 'Text') }}</span>
+              <button type="button" title="Drag to resize" aria-label="Resize design element" class="absolute bottom-0 right-0 h-4 w-4 touch-none cursor-nwse-resize border-l border-t border-blue-600 bg-white" @pointerdown.stop="beginCanvasInteraction($event,element,'resize')" @click.stop></button>
+            </div>
+          </div>
+        </section>
+        <aside class="overflow-auto border-l border-slate-200 bg-white p-4">
+          <h3 class="font-bold">Design elements</h3>
+          <p class="mt-1 text-xs text-slate-500">Drag an item to move it. Drag its bottom-right corner to resize it; no measurement guesswork needed.</p>
+          <div class="mt-4 space-y-3">
+            <div v-for="element in templateElements" :key="element.id" class="rounded-xl border border-slate-200 p-3">
+              <div class="mb-2 flex items-center justify-between"><b class="text-sm">{{ element.type==='text' ? 'Readable text' : element.type==='qr' ? 'Scannable QR code' : element.type==='box' ? 'Resizable border' : 'Barcode' }}</b><button @click="templateElements=templateElements.filter(item=>item.id!==element.id)" class="text-xs text-red-600">Remove</button></div>
+              <small v-if="element.type==='qr'" class="mb-2 block text-xs text-slate-500">QR image encodes the value from the selected Excel column.</small>
+              <small v-else-if="element.type==='text'&&element.field" class="mb-2 block text-xs text-slate-500">Prints the value as readable text.</small>
+              <select v-if="(element.type==='qr'||element.type==='barcode'||(element.type==='text'&&element.field))" v-model="element.field" class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"><option v-for="[field,label] in availableFields" :key="field" :value="field">{{ label }}</option></select>
+              <input v-if="element.type==='text'" v-model="element.label" placeholder="Optional label" class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs">
+              <div class="grid grid-cols-2 gap-2"><label v-for="key in ['x','y','w','h']" :key="key" class="text-xs capitalize text-slate-500">{{ key }}<input v-model.number="element[key]" type="number" min="0" :max="key==='w'?760-element.x:key==='h'?535-element.y:key==='x'?760-element.w:535-element.h" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label></div>
+              <label v-if="element.type==='text'" class="mt-2 block text-xs text-slate-500">Font size<input v-model.number="element.fontSize" type="number" min="8" max="64" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label>
+            </div>
+          </div>
+          <p v-if="!templateElements.length" class="mt-4 text-sm text-slate-500">Your canvas is blank. Add an Excel field or a border to start.</p>
+        </aside>
       </div>
     </div>
   </div>
