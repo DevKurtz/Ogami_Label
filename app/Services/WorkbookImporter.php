@@ -114,6 +114,7 @@ class WorkbookImporter
                     }
                     $tables[] = [
                         'id' => "s{$sheetIndex}-r{$headerRow}-c{$startColumn}-{$endColumn}",
+                        'tableName' => 'Table '.(count(array_filter($tables, fn ($table) => $table['sheetIndex'] === $sheetIndex)) + 1),
                         'sheetIndex' => $sheetIndex,
                         'sheetName' => $sheet->getTitle(),
                         'headerRow' => $headerRow,
@@ -124,7 +125,7 @@ class WorkbookImporter
                         'sample' => $sample,
                         'codeColumns' => array_values(array_map(function ($header) {
                             $normalized = $this->normalize($header);
-                            $suggested = str_contains($normalized, 'QR') ? 'qr' : (preg_match('/SERIAL|QUANTITY|PARTNUMBER|SUPPLIER|DATECODE/', $normalized) && str_contains($normalized, 'CODE') ? 'barcode' : null);
+                            $suggested = str_contains($normalized, 'QR') ? 'qr' : (str_contains($normalized, 'BARCODE') || (preg_match('/SERIAL|QUANTITY|PARTNUMBER|SUPPLIER|DATECODE/', $normalized) && str_contains($normalized, 'CODE')) ? 'barcode' : null);
                             return ['header' => $header, 'suggestedType' => $suggested];
                         }, array_filter($groupHeaders, fn ($header) => preg_match('/code|barcode|qr/i', $header)))),
                         'rowCount' => max(0, $lastSegmentRow - $headerRow),
@@ -153,11 +154,13 @@ class WorkbookImporter
             $headers[$column] = $header !== '' ? $header : "Column {$column}";
         }
         $indices = [];
+        $mappedHeaders = [];
         foreach (self::FIELDS as $key => $aliases) {
             $wanted = array_map(fn ($value) => $this->normalize($value), $aliases);
             foreach ($headers as $index => $header) {
                 if (in_array($this->normalize($header), $wanted, true)) {
                     $indices[$key] = $index;
+                    $mappedHeaders[$header] = true;
                     break;
                 }
             }
@@ -204,7 +207,11 @@ class WorkbookImporter
         if (!$rows) throw new RuntimeException('No data rows were found in the selected table.');
         if ($errors) throw new RuntimeException(implode("\n", array_slice($errors, 0, 12)));
 
-        return ['headers' => array_values($headers), 'rows' => $rows];
+        return [
+            'headers' => array_values($headers),
+            'unmappedHeaders' => array_values(array_filter($headers, fn ($header) => !isset($mappedHeaders[$header]))),
+            'rows' => $rows,
+        ];
     }
 
     private function normalize(string $value): string

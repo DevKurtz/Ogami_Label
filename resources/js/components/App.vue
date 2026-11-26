@@ -22,7 +22,7 @@ const historyMessage = ref('');
 const historyError = ref('');
 const analysis = ref(null);
 const analyzing = ref(false);
-const selectedTableId = ref('');
+const selectedTableIds = ref([]);
 const codeTypes = ref({});
 const editorOpen = ref(false);
 const templateElements = ref([]);
@@ -37,11 +37,12 @@ const builtInFields = [
     ['serialNo', 'Serial number'], ['supplierPn', 'Supplier part number'], ['qrCode', 'QR code'],
     ['serialCode', 'Serial code'], ['quantityCode', 'Quantity code'], ['partNumberCode', 'Part number code'], ['supplierCode', 'Supplier code'],
 ];
-const selectedTable = computed(() => analysis.value?.tables?.find((table) => table.id === selectedTableId.value) ?? null);
-const codeColumns = computed(() => selectedTable.value?.codeColumns ?? []);
-watch(selectedTable, (table) => {
-    codeTypes.value = Object.fromEntries((table?.codeColumns ?? []).map((column) => [column.header, column.suggestedType ?? '']));
-});
+const selectedTables = computed(() => (analysis.value?.tables ?? []).filter((table) => selectedTableIds.value.includes(table.id)));
+function selectAllTables() {
+    selectedTableIds.value = (analysis.value?.tables ?? []).map((table) => table.id);
+    codeTypes.value = Object.fromEntries((analysis.value?.tables ?? []).map((table) => [table.id, Object.fromEntries((table.codeColumns ?? []).map((column) => [column.header, column.suggestedType ?? '']))]));
+}
+function selectNoTables() { selectedTableIds.value = []; }
 const errorLines = computed(() => error.value.split('\n').filter(Boolean));
 const errorSummary = computed(() => {
     const missing = errorLines.value.map((line) => line.match(/^Row (\d+): (.+) is blank\.$/));
@@ -91,22 +92,21 @@ async function refreshBatches() {
     batches.value = await request('/api/batches');
 }
 async function upload() {
-    if (!file.value || !selectedTable.value) return;
+    if (!file.value || !selectedTables.value.length) return;
     loading.value = true; error.value = ''; success.value = null;
-    const form = new FormData(); form.append('file', file.value); form.append('name', batchName.value || file.value.name);
-    for (const [key, value] of Object.entries(selectedTable.value)) {
-        if (['sheetIndex', 'headerRow', 'startColumn', 'endColumn', 'endRow'].includes(key)) form.append(`table[${key}]`, value);
-    }
-    form.append('code_types', JSON.stringify(codeTypes.value));
+    const form = new FormData(); form.append('file', file.value); form.append('name', batchName.value || file.value.name.replace(/\.[^.]+$/, ''));
+    form.append('tables', JSON.stringify(selectedTables.value.map((table) => ({ ...table, codeTypes: codeTypes.value[table.id] ?? {} }))));
     try {
-        const saved = await request('/api/batches', { method: 'POST', body: form });
+        const result = await request('/api/batches', { method: 'POST', body: form });
         await refreshBatches();
+        const saved = result.batches?.[0];
+        if (!saved) throw new Error('No workbook tables were saved. Analyze the file and choose at least one table.');
         selectedBatch.value = saved;
         selectedRecord.value = saved.records?.[0] ?? null;
-        success.value = { name: saved.name, filename: saved.original_filename, count: saved.row_count };
+        success.value = { name: batchName.value || file.value.name.replace(/\.[^.]+$/, ''), filename: saved.original_filename, count: result.batches.reduce((total, batch) => total + batch.row_count, 0), batchCount: result.batches.length };
         file.value = null;
         batchName.value = '';
-        analysis.value = null; selectedTableId.value = ''; codeTypes.value = {};
+        analysis.value = null; selectedTableIds.value = []; codeTypes.value = {};
         if (fileInput.value) fileInput.value.value = '';
         activePage.value = 'history';
     } catch (exception) { error.value = exception.message; }
@@ -114,18 +114,18 @@ async function upload() {
 }
 async function analyzeWorkbook() {
     if (!file.value || analyzing.value) return;
-    analyzing.value = true; error.value = ''; analysis.value = null; selectedTableId.value = ''; codeTypes.value = {};
+    analyzing.value = true; error.value = ''; analysis.value = null; selectedTableIds.value = []; codeTypes.value = {};
     const form = new FormData(); form.append('file', file.value);
     try {
         analysis.value = await request('/api/analyze', { method: 'POST', body: form });
-        selectedTableId.value = analysis.value.tables?.[0]?.id ?? '';
+        selectAllTables();
     } catch (exception) { error.value = exception.message; }
     finally { analyzing.value = false; }
 }
 function onFileChange(event) {
     error.value = '';
     success.value = null;
-    analysis.value = null; selectedTableId.value = ''; codeTypes.value = {};
+    analysis.value = null; selectedTableIds.value = []; codeTypes.value = {};
     file.value = event.target.files?.[0] ?? null;
     if (file.value && file.value.size > 4 * 1024 * 1024) {
         error.value = 'This file is larger than 4 MB. Choose a smaller Excel file.';
@@ -137,7 +137,7 @@ function clearFile(input) {
     file.value = null;
     error.value = '';
     success.value = null;
-    analysis.value = null; selectedTableId.value = ''; codeTypes.value = {};
+    analysis.value = null; selectedTableIds.value = []; codeTypes.value = {};
     if (input) input.value = '';
 }
 async function openBatch(id) {
@@ -159,7 +159,9 @@ function makeDefaultTemplate() {
     ];
     const elements = defs.map(([type,field,label,x,y,w,h,fontSize],index) => ({ id:`el-${Date.now()}-${index}`, type, field, label, x,y,w,h,fontSize }));
     const configured = selectedRecord.value?.data?.customFields ?? [];
+    const builtInCodes = new Set(['QR CODE', 'SERIAL CODE', 'QUANTITY CODE', 'PART NUMBER CODE', 'SUPPLIER CODE']);
     for (const item of configured) {
+        if (builtInCodes.has(item.name.trim().toUpperCase())) continue;
         const type = selectedBatch.value?.field_config?.[item.name];
         if (!['qr','barcode'].includes(type)) continue;
         const index = elements.length;
@@ -311,7 +313,7 @@ onMounted(async () => {
     </header>
     <main class="mx-auto max-w-7xl px-5 py-8">
       <div class="mb-6 flex flex-wrap items-end justify-between gap-4">
-        <div><h1 class="text-3xl font-bold">{{ {upload:'Upload Excel',history:'Upload history'}[activePage] }}</h1><p class="mt-1 text-sm text-slate-500">Each workbook has its own folder, with one label record for every row.</p></div>
+        <div><h1 class="text-3xl font-bold">{{ {upload:'Upload Excel',history:'Upload history'}[activePage] }}</h1><p class="mt-1 text-sm text-slate-500">Each selected table gets its own history folder and label canvas; every data row gets a label.</p></div>
         <input v-model="query" class="w-80 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm" placeholder="Search Excel, serial, part no…" />
       </div>
       <div v-if="error" role="alert" class="mb-5 rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
@@ -326,7 +328,7 @@ onMounted(async () => {
         <p class="mt-2 text-red-700">No records were saved. Your selected file is still here; correct the workbook and upload it again.</p>
       </div>
       <div v-if="success" role="status" class="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
-        <div><b class="block">Upload complete and saved</b><span>{{ success.filename }} · {{ success.count }} row labels · folder “{{ success.name }}”</span></div>
+        <div><b class="block">Upload complete and saved</b><span>{{ success.filename }} · {{ success.batchCount }} separate table canvas(es) · {{ success.count }} row labels · “{{ success.name }}”</span></div>
         <button @click="activePage='history'; openBatch(selectedBatch.id)" class="rounded-lg border border-emerald-300 bg-white px-3 py-2 font-semibold text-emerald-800">View in history</button>
       </div>
 
@@ -348,20 +350,19 @@ onMounted(async () => {
           </div>
           <button v-if="file && !analysis" :disabled="analyzing" @click="analyzeWorkbook" class="mt-4 rounded-lg border border-blue-300 bg-blue-50 px-4 py-2.5 font-semibold text-blue-800 disabled:opacity-50">{{ analyzing ? 'Analyzing workbook…' : 'Analyze workbook' }}</button>
           <div v-if="analysis" class="mt-4 space-y-4 rounded-xl border border-blue-100 bg-blue-50/60 p-4">
-            <div><h3 class="font-bold">Workbook analysis</h3><p class="mt-1 text-sm text-slate-600">Found {{ analysis.sheets.length }} worksheet(s) and {{ analysis.tables.length }} table section(s). Select the table to use.</p></div>
+            <div class="flex flex-wrap items-center gap-2"><div class="mr-auto"><h3 class="font-bold">Workbook analysis</h3><p class="mt-1 text-sm text-slate-600">Found {{ analysis.sheets.length }} worksheet(s) and {{ analysis.tables.length }} table section(s). Each selected table becomes its own history folder and canvas.</p></div><button @click="selectAllTables" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold">Select all</button><button @click="selectNoTables" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold">Clear</button></div>
             <p v-if="!analysis.tables.length" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">No table with a header and data rows was detected. Check that the table has column names in its first row.</p>
-            <label v-else class="block text-sm font-medium">Detected table<select v-model="selectedTableId" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2"><option v-for="table in analysis.tables" :key="table.id" :value="table.id">{{ table.sheetName }} · rows {{ table.headerRow }}–{{ table.endRow }} · {{ table.headers.join(', ') }}</option></select></label>
-            <div v-if="selectedTable" class="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-              <table class="min-w-full text-left text-xs"><thead class="bg-slate-100"><tr><th v-for="(header,index) in selectedTable.headers" :key="index" class="whitespace-nowrap px-3 py-2 font-semibold">{{ header }}</th></tr></thead><tbody><tr v-for="(row,index) in selectedTable.sample" :key="index"><td v-for="(value,col) in row" :key="col" class="max-w-48 truncate border-t border-slate-100 px-3 py-2">{{ value }}</td></tr></tbody></table>
+            <div v-else class="max-h-[520px] space-y-3 overflow-auto pr-1">
+              <article v-for="table in analysis.tables" :key="table.id" class="rounded-xl border bg-white p-3" :class="selectedTableIds.includes(table.id)?'border-blue-400 ring-1 ring-blue-200':'border-slate-200'">
+                <label class="flex cursor-pointer items-start gap-3"><input v-model="selectedTableIds" type="checkbox" :value="table.id" class="mt-1 h-4 w-4 rounded border-slate-300 text-blue-600"><span class="min-w-0 flex-1"><b class="block">{{ table.sheetName }} · {{ table.tableName }}</b><small class="block text-slate-500">{{ table.rowCount }} data rows · header row {{ table.headerRow }} · {{ table.headers.join(' · ') }}</small></span></label>
+                <details class="ml-7 mt-2"><summary class="cursor-pointer text-xs font-medium text-blue-700">Preview detected rows</summary><div class="mt-2 overflow-x-auto rounded border border-slate-200"><table class="min-w-full text-left text-xs"><thead class="bg-slate-100"><tr><th v-for="(header,index) in table.headers" :key="index" class="whitespace-nowrap px-2 py-1.5">{{ header }}</th></tr></thead><tbody><tr v-for="(row,index) in table.sample" :key="index"><td v-for="(value,col) in row" :key="col" class="max-w-40 truncate border-t border-slate-100 px-2 py-1.5">{{ value }}</td></tr></tbody></table></div></details>
+                <div v-if="selectedTableIds.includes(table.id)&&table.codeColumns.length" class="ml-7 mt-3 space-y-2 rounded-lg bg-slate-50 p-3"><div><b class="text-xs">How should these codes appear on this canvas?</b><p class="text-xs text-slate-500">Your choice applies to this table only.</p></div><label v-for="column in table.codeColumns" :key="column.header" class="flex flex-wrap items-center justify-between gap-2 text-xs"><span>{{ column.header }} <small v-if="column.suggestedType" class="text-slate-500">· suggested {{ column.suggestedType === 'qr' ? 'QR code' : 'barcode' }}</small></span><select v-model="codeTypes[table.id][column.header]" class="rounded-lg border border-slate-300 bg-white px-2 py-1.5"><option value="">Choose…</option><option value="barcode">Barcode</option><option value="qr">QR code</option><option value="text">Text only</option><option value="ignore">Do not show</option></select></label></div>
+                <p v-if="selectedTableIds.includes(table.id)" class="ml-7 mt-2 text-xs text-slate-500">Other columns stay available as variables in this table’s design editor.</p>
+              </article>
             </div>
-            <div v-if="selectedTable && codeColumns.length" class="space-y-3 rounded-lg bg-white p-3">
-              <div><b class="text-sm">Choose how code columns should appear</b><p class="mt-1 text-xs text-slate-500">These settings are saved with this upload. Original cell values stay unchanged.</p></div>
-              <label v-for="column in codeColumns" :key="column.header" class="flex flex-wrap items-center justify-between gap-2 text-sm"><span>{{ column.header }} <small v-if="column.suggestedType" class="text-slate-500">· suggested {{ column.suggestedType === 'qr' ? 'QR code' : 'barcode' }}</small></span><select v-model="codeTypes[column.header]" class="rounded-lg border border-slate-300 bg-white px-3 py-2"><option value="">Choose output…</option><option value="barcode">Barcode</option><option value="qr">QR code</option><option value="text">Text only</option><option value="ignore">Do not show</option></select></label>
-            </div>
-            <p v-if="selectedTable" class="text-xs text-slate-500">Other columns are kept as custom fields for the label design editor.</p>
           </div>
           <label class="mt-4 block text-sm font-medium">Workbook / folder name<input v-model="batchName" class="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2" placeholder="Excel 1" /></label>
-          <button :disabled="!file||!selectedTable||codeColumns.some((column)=>!codeTypes[column.header])||loading" @click="upload" class="mt-4 flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
+          <button :disabled="!file||!selectedTables.length||selectedTables.some((table)=>table.codeColumns.some((column)=>!codeTypes[table.id]?.[column.header]))||loading" @click="upload" class="mt-4 flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50">
             <span v-if="loading" class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"></span>
             {{ loading?'Uploading and generating labels…':'Upload and generate labels' }}
           </button>
@@ -408,8 +409,8 @@ onMounted(async () => {
       <header class="flex flex-wrap items-center gap-3 border-b border-slate-200 bg-white px-5 py-3"><div class="mr-auto"><b class="text-lg">Label design editor</b><p class="text-xs text-slate-500">Drag a field onto the canvas. Select an item to change its field, size, or remove it.</p></div><span v-if="templateMessage" class="text-sm text-emerald-700">{{ templateMessage }}</span><span v-if="templateError" class="text-sm text-red-700">{{ templateError }}</span><button @click="saveTemplate" :disabled="templateSaving" class="rounded-lg bg-blue-600 px-4 py-2 font-semibold text-white disabled:opacity-50">{{ templateSaving ? 'Saving…' : 'Save design' }}</button><button @click="editorOpen=false" class="rounded-lg border border-slate-300 px-4 py-2">Close</button></header>
       <div class="grid min-h-0 flex-1 lg:grid-cols-[270px_minmax(0,1fr)_300px]">
         <aside class="overflow-auto border-r border-slate-200 bg-white p-4"><h3 class="mb-3 font-bold">Text fields</h3><div class="space-y-2"><button v-for="[field,label] in availableFields" :key="field" draggable="true" @dragstart="(event)=>{event.dataTransfer.setData('application/ogami-type','text');event.dataTransfer.setData('application/ogami-field',field)}" @click="addCanvasElement('text',field)" class="block w-full cursor-grab rounded-lg border border-slate-200 p-2 text-left text-sm hover:border-blue-400">{{ label }} <small class="block truncate text-slate-400">{{ field }}</small></button></div><h3 class="mb-2 mt-6 font-bold">Code fields</h3><div class="space-y-2"><template v-for="[field,label] in availableFields.filter(([field])=>/code|qr|barcode/i.test(field))" :key="field"><div class="rounded-lg border border-slate-200 p-2"><b class="block text-xs">{{ label }}</b><button draggable="true" @dragstart="(event)=>{event.dataTransfer.setData('application/ogami-type',codeTypeFor(field));event.dataTransfer.setData('application/ogami-field',field)}" @click="addCanvasElement(codeTypeFor(field),field)" class="mt-1 w-full rounded bg-slate-50 px-2 py-1 text-left text-xs hover:bg-blue-50">{{ codeTypeFor(field)==='qr' ? '▦ Add QR code' : '▥ Add barcode' }} <span v-if="selectedBatch?.field_config?.[field]" class="text-slate-500">· selected</span></button><div class="mt-1 flex gap-1"><button @click="addCanvasElement(codeTypeFor(field)==='qr'?'barcode':'qr',field)" class="text-[11px] text-blue-700 underline">Add as {{ codeTypeFor(field)==='qr'?'barcode':'QR code' }} instead</button></div></div></template></div><button @click="addCanvasElement('text')" class="mt-5 w-full rounded-lg bg-slate-100 p-2 text-sm font-semibold">+ Add static text</button></aside>
-        <section class="flex min-w-0 items-center justify-center overflow-auto p-5 lg:p-10" @dragover.prevent @drop.prevent="canvasDrop($event)"><div ref="canvasElement" class="relative aspect-[760/535] w-full max-w-[1100px] shrink-0 overflow-hidden bg-white shadow-xl ring-1 ring-slate-300" @dragover.prevent @drop.prevent.stop="canvasDrop($event)"><div class="pointer-events-none absolute inset-0 border-2 border-black"></div><div v-for="element in templateElements" :key="element.id" draggable="true" @dragstart="(event)=>{draggingElement=element;event.dataTransfer.setData('text/plain',element.id)}" class="absolute cursor-move overflow-hidden border border-dashed border-blue-300/80 bg-white/30 px-1 text-slate-900 hover:border-blue-600" :style="{left:`${element.x/760*100}%`,top:`${element.y/535*100}%`,width:`${element.w/760*100}%`,height:`${element.h/535*100}%`,fontSize:`${element.fontSize||20}px`}"><span v-if="element.type==='qr'" class="grid h-full place-items-center bg-slate-100 text-4xl">▦</span><span v-else-if="element.type==='barcode'" class="grid h-full place-items-center bg-white text-3xl tracking-widest">▥ ▥ ▥</span><span v-else class="block truncate">{{ element.label || elementValue(element) || (element.field ? `[${element.field}]` : 'Text') }}</span></div></div></section>
-        <aside class="overflow-auto border-l border-slate-200 bg-white p-4"><h3 class="font-bold">Selected element</h3><p class="mt-1 text-xs text-slate-500">Choose an item on the canvas list below to edit its position and content.</p><div class="mt-4 space-y-3"><div v-for="element in templateElements" :key="element.id" class="rounded-xl border border-slate-200 p-3"><div class="mb-2 flex items-center justify-between"><b class="text-sm">{{ element.type==='text' ? 'Text' : element.type==='qr' ? 'QR code' : 'Barcode' }}</b><button @click="templateElements=templateElements.filter(item=>item.id!==element.id)" class="text-xs text-red-600">Remove</button></div><select v-if="element.type!=='text' || element.field" v-model="element.field" class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"><option v-for="[field,label] in availableFields" :key="field" :value="field">{{ label }}</option></select><input v-if="element.type==='text'" v-model="element.label" placeholder="Optional label" class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"><div class="grid grid-cols-2 gap-2"><label v-for="key in ['x','y','w','h']" :key="key" class="text-xs capitalize text-slate-500">{{ key }}<input v-model.number="element[key]" type="number" min="0" max="760" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label></div><label v-if="element.type==='text'" class="mt-2 block text-xs text-slate-500">Font size<input v-model.number="element.fontSize" type="number" min="8" max="64" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label></div><p v-if="!templateElements.length" class="mt-4 text-sm text-slate-500">No elements yet. Drag fields from the left panel.</p></div></aside>
+        <section class="flex min-w-0 items-center justify-center overflow-auto p-5 lg:p-10" @dragover.prevent @drop.prevent="canvasDrop($event)"><div ref="canvasElement" class="relative aspect-[760/535] w-full max-w-[1100px] shrink-0 overflow-hidden bg-white shadow-xl ring-1 ring-slate-300" @dragover.prevent @drop.prevent.stop="canvasDrop($event)"><div class="pointer-events-none absolute inset-0 border-2 border-black"></div><div v-for="element in templateElements" :key="element.id" draggable="true" @dragstart="(event)=>{draggingElement=element;event.dataTransfer.setData('text/plain',element.id)}" class="absolute cursor-move overflow-hidden border border-dashed border-blue-300/80 bg-white/30 px-1 text-slate-900 hover:border-blue-600" :style="{left:`${element.x/760*100}%`,top:`${element.y/535*100}%`,width:`${element.w/760*100}%`,height:`${element.h/535*100}%`,fontSize:`${element.fontSize||20}px`}"><span v-if="element.type==='box'" class="block h-full w-full border border-slate-800"></span><span v-else-if="element.type==='qr'" class="grid h-full place-items-center bg-slate-100 text-4xl">▦</span><span v-else-if="element.type==='barcode'" class="grid h-full place-items-center bg-white text-3xl tracking-widest">▥ ▥ ▥</span><span v-else class="block truncate">{{ element.label || elementValue(element) || (element.field ? `[${element.field}]` : 'Text') }}</span></div></div></section>
+        <aside class="overflow-auto border-l border-slate-200 bg-white p-4"><h3 class="font-bold">Design elements</h3><p class="mt-1 text-xs text-slate-500">Drag items on the canvas to move them. Adjust position and size below.</p><div class="mt-4 space-y-3"><div v-for="element in templateElements" :key="element.id" class="rounded-xl border border-slate-200 p-3"><div class="mb-2 flex items-center justify-between"><b class="text-sm">{{ element.type==='text' ? 'Text' : element.type==='qr' ? 'QR code' : element.type==='box' ? 'Border' : 'Barcode' }}</b><button @click="templateElements=templateElements.filter(item=>item.id!==element.id)" class="text-xs text-red-600">Remove</button></div><select v-if="(element.type==='qr'||element.type==='barcode'||(element.type==='text'&&element.field))" v-model="element.field" class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"><option v-for="[field,label] in availableFields" :key="field" :value="field">{{ label }}</option></select><input v-if="element.type==='text'" v-model="element.label" placeholder="Optional label" class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"><div class="grid grid-cols-2 gap-2"><label v-for="key in ['x','y','w','h']" :key="key" class="text-xs capitalize text-slate-500">{{ key }}<input v-model.number="element[key]" type="number" min="0" max="760" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label></div><label v-if="element.type==='text'" class="mt-2 block text-xs text-slate-500">Font size<input v-model.number="element.fontSize" type="number" min="8" max="64" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label></div><p v-if="!templateElements.length" class="mt-4 text-sm text-slate-500">Drag fields from the left panel.</p></div></aside>
       </div>
     </div>
   </div>

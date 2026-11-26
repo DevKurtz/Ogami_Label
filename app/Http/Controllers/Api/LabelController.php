@@ -73,6 +73,10 @@ class LabelController extends Controller
                 $y = max(0, min(535, (float) ($element['y'] ?? 0)));
                 $w = max(20, min(760 - $x, (float) ($element['w'] ?? 200)));
                 $h = max(20, min(535 - $y, (float) ($element['h'] ?? 40)));
+                if (($element['type'] ?? '') === 'box') {
+                    $svg[] = sprintf('<rect x="%s" y="%s" width="%s" height="%s" fill="white" stroke="#111" stroke-width="1.5"/>', $x,$y,$w,$h);
+                    continue;
+                }
                 $field = (string) ($element['field'] ?? '');
                 $value = $field === '' ? (string) ($element['label'] ?? '') : (string) ($data[$field] ?? collect($data['customFields'] ?? [])->firstWhere('name', $field)['value'] ?? '');
                 $type = $element['type'] ?? 'text';
