@@ -10,6 +10,7 @@ use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\SvgWriter;
 use Illuminate\Http\Response;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Picqer\Barcode\BarcodeGeneratorSVG;
 
 class LabelController extends Controller
@@ -27,24 +28,28 @@ class LabelController extends Controller
                 if (trim($candidate) !== '') { $qrValue = $candidate; break; }
             }
         }
-        $qrMarkup = '';
-        if ($qrValue !== '') {
+        $renderQr = function (string $value, float $x, float $y, float $width, float $height, int $margin = 2) use ($record): string {
+            if (trim($value) === '') return '';
             try {
-                $qrSvg = (new SvgWriter())->write(new QrCode(
-                    data: $qrValue,
+                $raw = (new SvgWriter())->write(new QrCode(
+                    data: $value,
                     encoding: new Encoding('UTF-8'),
                     errorCorrectionLevel: ErrorCorrectionLevel::Medium,
                     size: 180,
-                    margin: 3,
+                    margin: $margin,
                 ))->getString();
-                preg_match('/viewBox="([^"]+)"/', $qrSvg, $qrViewBox);
-                $qrInner = preg_replace('/^.*?<svg[^>]*>|<\/svg>.*$/s', '', $qrSvg) ?? '';
-                $qrInner = preg_replace('/<\?xml[^>]*>|<!DOCTYPE[^>]*>/i', '', $qrInner) ?? $qrInner;
-                $qrMarkup = '<svg x="600" y="8" width="145" height="135" viewBox="'.e($qrViewBox[1] ?? '0 0 180 180').'" role="img"><title>'.e($qrValue).'</title><g>'.$qrInner.'</g></svg>';
-            } catch (\Throwable) {
-                // Keep the label available when the optional QR value is blank or cannot be encoded.
+                preg_match('/viewBox="([^"]+)"/', $raw, $bounds);
+                $inner = preg_replace('/^.*?<svg[^>]*>|<\/svg>.*$/s', '', $raw) ?? '';
+                $inner = preg_replace('/<\?xml[^>]*>|<!DOCTYPE[^>]*>/i', '', $inner) ?? $inner;
+                if (empty($bounds[1]) || trim($inner) === '') throw new \RuntimeException('The QR encoder returned empty SVG data.');
+
+                return sprintf('<svg x="%s" y="%s" width="%s" height="%s" viewBox="%s" role="img"><title>%s</title><g>%s</g></svg>', $x, $y, $width, $height, e($bounds[1]), e($value), $inner);
+            } catch (\Throwable $exception) {
+                Log::warning('Could not render QR code on label.', ['record_id' => $record->getKey(), 'exception' => $exception::class]);
+                return '';
             }
-        }
+        };
+        $qrMarkup = $renderQr($qrValue, 600, 8, 145, 135, 3);
         $generator = new BarcodeGeneratorSVG();
         $barcode = function (string $code, int $x, int $y, int $width, int $height) use ($generator): string {
             if (trim($code) === '' || strlen($code) > 255 || preg_match('/[^\x20-\x7E]/', $code)) return '';
@@ -79,6 +84,8 @@ class LabelController extends Controller
         };
         if (!empty($batch->label_template['elements']) && is_array($batch->label_template['elements'])) {
             $elements = $batch->label_template['elements'];
+            $hasQrElement = collect($elements)->contains(fn ($element) => ($element['type'] ?? '') === 'qr');
+            $looksLikeOgamiLayout = collect($elements)->filter(fn ($element) => in_array($element['field'] ?? '', ['partNumber', 'quantity', 'partName', 'modelName', 'serialNo'], true))->count() >= 3;
             $svg = ['<svg xmlns="http://www.w3.org/2000/svg" width="152mm" height="107mm" viewBox="0 0 760 535"><defs>'];
             foreach ($elements as $index => $element) $svg[] = sprintf('<clipPath id="element-clip-%d"><rect x="%s" y="%s" width="%s" height="%s"/></clipPath>', $index, max(0,(float)($element['x']??0)), max(0,(float)($element['y']??0)), max(20,(float)($element['w']??200)), max(20,(float)($element['h']??40)));
             $svg[] = '</defs>';
@@ -94,13 +101,9 @@ class LabelController extends Controller
                 $field = (string) ($element['field'] ?? '');
                 $value = $field === '' ? (string) ($element['label'] ?? '') : (string) ($data[$field] ?? collect($data['customFields'] ?? [])->firstWhere('name', $field)['value'] ?? '');
                 $type = $element['type'] ?? 'text';
+                if ($type === 'qr' && trim($value) === '') $value = $qrValue;
                 if ($type === 'qr' && trim($value) !== '') {
-                    try {
-                        $raw = (new SvgWriter())->write(new QrCode(data:$value, encoding:new Encoding('UTF-8'), errorCorrectionLevel:ErrorCorrectionLevel::Medium, size:180, margin:2))->getString();
-                        preg_match('/viewBox="([^"]+)"/', $raw, $bounds);
-                        $inner = preg_replace('/^.*?<svg[^>]*>|<\/svg>.*$/s', '', $raw) ?? '';
-                        $svg[] = sprintf('<svg x="%s" y="%s" width="%s" height="%s" viewBox="%s" clip-path="url(#element-clip-%d)">%s</svg>', $x,$y,$w,$h,e($bounds[1] ?? '0 0 180 180'),$elementIndex,$inner);
-                    } catch (\Throwable) { /* Skip invalid code values but keep remaining content. */ }
+                    $svg[] = '<g clip-path="url(#element-clip-'.$elementIndex.')">'.$renderQr($value, $x, $y, $w, $h).'</g>';
                     continue;
                 }
                 if ($type === 'barcode' && trim($value) !== '') {
@@ -112,6 +115,9 @@ class LabelController extends Controller
                 $baseline = min(535, $y + min($h - 2, $size + 4));
                 $svg[] = sprintf('<text x="%s" y="%s" font-family="Arial,sans-serif" font-size="%d" clip-path="url(#element-clip-%d)">%s</text>', $x + 3, $baseline, $size, $elementIndex, e($display));
             }
+            // Older Ogami templates may have saved without a QR widget. Keep the historical
+            // top-right QR when the sheet still has its familiar standard fields and QR data.
+            if (!$hasQrElement && $looksLikeOgamiLayout && $qrValue !== '') $svg[] = $renderQr($qrValue, 600, 8, 145, 135, 3);
             $svg[] = '</svg>';
 
             return response(implode('', $svg), 200, ['Content-Type' => 'image/svg+xml; charset=utf-8', 'Cache-Control' => 'private, max-age=86400, immutable']);
