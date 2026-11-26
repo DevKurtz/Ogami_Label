@@ -148,6 +148,10 @@ function moveRecord(step) {
     const next = records.value[recordIndex.value + step]; if (next) selectedRecord.value = next;
 }
 function labelUrl(record) { return `/api/records/${record.id}/label.svg`; }
+function printLabel() {
+    if (!selectedRecord.value) return;
+    window.print();
+}
 async function downloadLabel(record) {
     const image = labelImage.value;
     if (!image || downloading.value) return;
@@ -269,9 +273,10 @@ onMounted(async () => {
         </article>
         <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <template v-if="selectedRecord">
-            <div class="mb-4 flex items-center justify-between"><span class="text-sm text-slate-500">{{ selectedBatch?.name }} / Row {{ selectedRecord.row_number }} · {{ recordIndex+1 }} of {{ records.length }}</span><div class="flex gap-2"><button @click="moveRecord(-1)" :disabled="recordIndex<=0||downloading" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">‹ Previous</button><button @click="moveRecord(1)" :disabled="recordIndex>=records.length-1||downloading" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">Next ›</button><button @click="downloadLabel(selectedRecord)" :disabled="downloading" class="rounded-lg bg-blue-600 px-3 py-2 text-white disabled:opacity-50">{{ downloading ? 'Preparing PNG…' : 'Download PNG' }}</button></div></div>
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-3"><span class="text-sm text-slate-500">{{ selectedBatch?.name }} / Row {{ selectedRecord.row_number }} · {{ recordIndex+1 }} of {{ records.length }}</span><div class="flex flex-wrap gap-2"><button @click="moveRecord(-1)" :disabled="recordIndex<=0||downloading" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">‹ Previous</button><button @click="moveRecord(1)" :disabled="recordIndex>=records.length-1||downloading" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">Next ›</button><button @click="printLabel" class="rounded-lg border border-slate-300 bg-white px-3 py-2 font-medium text-slate-700 hover:bg-slate-50">Print label</button><button @click="downloadLabel(selectedRecord)" :disabled="downloading" class="rounded-lg bg-blue-600 px-3 py-2 text-white disabled:opacity-50">{{ downloading ? 'Preparing PNG…' : 'Download PNG' }}</button></div></div>
             <p class="mb-2 text-xs text-slate-500">Label preview · Row {{ selectedRecord.row_number }} · Serial no. {{ selectedRecord.serial_no }}</p>
             <img ref="labelImage" :key="selectedRecord.id" :src="labelUrl(selectedRecord)" class="mx-auto block w-full max-w-[900px]" alt="Accurately encoded Ogami product label" />
+            <div class="print-label" aria-hidden="true"><img :src="labelUrl(selectedRecord)" alt="" /></div>
             <p v-if="downloadError" role="alert" class="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{{ downloadError }}</p>
             <div class="mt-4 grid gap-2 rounded-lg bg-slate-50 p-4 text-xs sm:grid-cols-2"><div>QR CODE: <code>{{ selectedRecord.qr_code }}</code></div><div>SERIAL CODE: <code>{{ selectedRecord.serial_code }}</code></div><div>QUANTITY CODE: <code>{{ selectedRecord.quantity_code }}</code></div><div>PART NUMBER CODE: <code>{{ selectedRecord.part_number_code }}</code></div><div>SUPPLIER CODE: <code>{{ selectedRecord.supplier_code }}</code></div></div>
           </template>
