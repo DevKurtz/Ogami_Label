@@ -2,10 +2,6 @@
 
 return [
 
-    'ogami' => [
-        'admin_email' => env('OGAMI_ADMIN_EMAIL'),
-    ],
-
     'google' => [
         'client_id' => env('GOOGLE_CLIENT_ID'),
         'client_secret' => env('GOOGLE_CLIENT_SECRET'),

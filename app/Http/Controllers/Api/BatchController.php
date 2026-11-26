@@ -9,59 +9,48 @@ use App\Services\WorkbookImporter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
 
 class BatchController extends Controller
 {
-    public function index(): JsonResponse
+    public function index(Request $request): JsonResponse
     {
-        return response()->json(WorkbookBatch::query()->withCount('records')->latest()->get());
+        return response()->json($request->user()->batches()->withCount('records')->latest()->get());
     }
 
-    public function show(WorkbookBatch $batch): JsonResponse
+    public function show(Request $request, WorkbookBatch $batch): JsonResponse
     {
-        return response()->json($batch->load(['records' => fn ($query) => $query->orderBy('row_number')]));
+        $ownedBatch = $request->user()->batches()->whereKey($batch->getKey())->firstOrFail();
+
+        return response()->json($ownedBatch->load(['records' => fn ($query) => $query->orderBy('row_number')]));
     }
 
     public function deleteStatus(Request $request): JsonResponse
     {
-        return response()->json(['enabled' => $this->isWorkspaceAdmin($request)]);
+        return response()->json(['enabled' => true]);
     }
 
     public function destroy(Request $request, WorkbookBatch $batch): JsonResponse
     {
-        $this->authorizeDelete($request);
-        $batch->delete();
+        $ownedBatch = $request->user()->batches()->whereKey($batch->getKey())->firstOrFail();
+        $ownedBatch->delete();
 
         return response()->json(['message' => 'Workbook folder and its label records were deleted.']);
     }
 
     public function destroyRecord(Request $request, LabelRecord $record): JsonResponse
     {
-        $this->authorizeDelete($request);
-        $batch = $record->batch;
+        $batch = $request->user()->batches()->whereKey($record->batch_id)->firstOrFail();
+        $ownedRecord = $batch->records()->whereKey($record->getKey())->firstOrFail();
 
-        DB::transaction(function () use ($record, $batch) {
-            $record->delete();
+        DB::transaction(function () use ($ownedRecord, $batch) {
+            $ownedRecord->delete();
             $batch->row_count = $batch->records()->count();
             $batch->save();
         });
 
         return response()->json(['message' => 'Label record deleted.', 'batch_id' => $batch->id]);
-    }
-
-    private function authorizeDelete(Request $request): void
-    {
-        abort_unless($this->isWorkspaceAdmin($request), 403, 'Only the configured workspace administrator can delete records.');
-    }
-
-    private function isWorkspaceAdmin(Request $request): bool
-    {
-        $adminEmail = Str::lower(trim((string) config('services.ogami.admin_email', '')));
-
-        return $adminEmail !== '' && Str::lower((string) $request->user()?->email) === $adminEmail;
     }
 
     public function store(Request $request, WorkbookImporter $importer): JsonResponse
@@ -80,7 +69,7 @@ class BatchController extends Controller
         }
 
         $batch = DB::transaction(function () use ($validated, $request, $imported) {
-            $batch = WorkbookBatch::create([
+            $batch = $request->user()->batches()->create([
                 'name' => $validated['name'] ?: $validated['file']->getClientOriginalName(),
                 'original_filename' => $validated['file']->getClientOriginalName(),
                 'row_count' => count($imported['rows']),

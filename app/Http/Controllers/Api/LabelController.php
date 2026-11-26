@@ -9,12 +9,14 @@ use Endroid\QrCode\ErrorCorrectionLevel;
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\SvgWriter;
 use Illuminate\Http\Response;
+use Illuminate\Http\Request;
 use Picqer\Barcode\BarcodeGeneratorSVG;
 
 class LabelController extends Controller
 {
-    public function show(LabelRecord $record): Response
+    public function show(Request $request, LabelRecord $record): Response
     {
+        $request->user()->batches()->whereKey($record->batch_id)->firstOrFail();
         $data = $record->data;
         $qrMarkup = '';
         if (trim($record->qr_code ?? '') !== '') {

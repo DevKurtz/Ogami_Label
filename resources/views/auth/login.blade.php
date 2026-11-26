@@ -28,7 +28,7 @@
                 <p class="mt-7 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Google sign-in is not configured yet. Add the Google OAuth values to the Vercel project to enable access.</p>
             @endif
 
-            <p class="mt-6 text-xs leading-5 text-slate-500">Only verified Google accounts can sign in. The configured workspace administrator can manage deletions.</p>
+            <p class="mt-6 text-xs leading-5 text-slate-500">Only verified Google accounts can sign in. Each account can view and delete only the workbooks it uploaded.</p>
         </section>
     </main>
 </body>
