@@ -42,6 +42,9 @@ const success = ref(null);
 const activePage = ref('upload');
 const labelImage = ref(null);
 const downloading = ref(false);
+const pdfDownloading = ref(false);
+const pdfProgress = ref({ current: 0, total: 0 });
+const pdfBatchId = ref(null);
 const downloadError = ref('');
 const deleteEnabled = ref(false);
 const userName = document.querySelector('meta[name="user-name"]')?.content ?? '';
@@ -456,6 +459,148 @@ async function downloadLabel(record) {
     }
 }
 
+async function rasterizeLabelForPdf(record, width = 2300) {
+    const image = new Image();
+    image.src = labelUrl(record);
+    if (typeof image.decode === 'function') await image.decode();
+    else if (!image.complete) await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = reject; });
+
+    const height = Math.round(width * 535 / 760);
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d', { willReadFrequently: true });
+    if (!context) throw new Error('This browser could not prepare a label image for the PDF.');
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, width, height);
+    context.drawImage(image, 0, 0, width, height);
+
+    // Embed lossless RGB pixels so fine barcode and QR edges remain crisp when printed.
+    const rgba = context.getImageData(0, 0, width, height).data;
+    const rowLength = width * 3;
+    const filtered = new Uint8Array((rowLength + 1) * height);
+    for (let y = 0; y < height; y++) {
+        const target = y * (rowLength + 1) + 1;
+        for (let x = 0; x < width; x++) {
+            const source = (y * width + x) * 4;
+            const destination = target + x * 3;
+            filtered[destination] = rgba[source];
+            filtered[destination + 1] = rgba[source + 1];
+            filtered[destination + 2] = rgba[source + 2];
+        }
+    }
+    if (!('CompressionStream' in window)) throw new Error('PDF image compression is not supported in this browser. Please use a recent version of Chrome, Edge, or Firefox.');
+    const compressor = new CompressionStream('deflate');
+    const writer = compressor.writable.getWriter();
+    await writer.write(filtered);
+    await writer.close();
+    return { width, height, bytes: new Uint8Array(await new Response(compressor.readable).arrayBuffer()) };
+}
+
+function buildTwoUpPdf(images) {
+    const pageWidth = 595.28; // A4 portrait, points
+    const pageHeight = 841.89;
+    const labelWidth = 493.23; // 174 mm, matching the guide's printable width
+    const labelHeight = labelWidth * 535 / 760;
+    const gap = 46.77; // 16.5 mm between labels
+    const top = (pageHeight - (labelHeight * 2 + gap)) / 2;
+    const x = (pageWidth - labelWidth) / 2;
+    const pageCount = Math.ceil(images.length / 2);
+    const objects = new Array(3 + pageCount * 4);
+    const ascii = (value) => new TextEncoder().encode(value);
+    const setObject = (id, data) => { objects[id] = typeof data === 'string' ? ascii(data) : data; };
+
+    setObject(1, '<< /Type /Catalog /Pages 2 0 R >>');
+    const pageIds = Array.from({ length: pageCount }, (_, index) => 3 + index * 4);
+    setObject(2, `<< /Type /Pages /Kids [${pageIds.map((id) => `${id} 0 R`).join(' ')}] /Count ${pageCount} >>`);
+
+    for (let page = 0; page < pageCount; page++) {
+        const pageId = pageIds[page];
+        const contentId = pageId + 1;
+        const imageIds = [pageId + 2, pageId + 3];
+        const firstIndex = page * 2;
+        const pageImages = images.slice(firstIndex, firstIndex + 2);
+        const blankImage = { width: 1, height: 1, bytes: new Uint8Array([120, 156, 99, 248, 255, 255, 63, 0, 5, 254, 2, 254]) };
+        const xobjects = pageImages.map((_, index) => `/Im${index + 1} ${imageIds[index]} 0 R`).join(' ');
+        setObject(pageId, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << ${xobjects} >> >> /Contents ${contentId} 0 R >>`);
+        const commands = pageImages.map((_, index) => {
+            const slotBottom = pageHeight - top - labelHeight - index * (labelHeight + gap);
+            return `q ${labelWidth} 0 0 ${labelHeight} ${x} ${slotBottom} cm /Im${index + 1} Do Q`;
+        }).join('\n');
+        const content = ascii(commands);
+        setObject(contentId, concatBytes([ascii(`<< /Length ${content.length} >>\nstream\n`), content, ascii('\nendstream')]));
+        [pageImages[0], pageImages[1] ?? blankImage].forEach((image, index) => {
+            setObject(imageIds[index], concatBytes([
+                ascii(`<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns ${image.width} >> /Length ${image.bytes.length} >>\nstream\n`),
+                image.bytes,
+                ascii('\nendstream'),
+            ]));
+        });
+    }
+
+    const parts = [ascii('%PDF-1.4\n')];
+    const offsets = [0];
+    let length = parts[0].length;
+    for (let id = 1; id < objects.length; id++) {
+        offsets[id] = length;
+        const object = concatBytes([ascii(`${id} 0 obj\n`), objects[id], ascii('\nendobj\n')]);
+        parts.push(object);
+        length += object.length;
+    }
+    const xrefOffset = length;
+    let xref = `xref\n0 ${objects.length}\n0000000000 65535 f \n`;
+    for (let id = 1; id < objects.length; id++) xref += `${String(offsets[id]).padStart(10, '0')} 00000 n \n`;
+    xref += `trailer\n<< /Size ${objects.length} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`;
+    parts.push(ascii(xref));
+    return new Blob(parts, { type: 'application/pdf' });
+}
+
+function concatBytes(parts) {
+    const result = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+    let offset = 0;
+    for (const part of parts) { result.set(part, offset); offset += part.length; }
+    return result;
+}
+
+async function downloadBatchPdf(batch = selectedBatch.value) {
+    if (!batch || pdfDownloading.value) return;
+    pdfDownloading.value = true;
+    pdfBatchId.value = batch.id;
+    try {
+        let pdfBatch = batch;
+        let batchRecords = selectedBatch.value?.id === batch.id ? records.value : null;
+        if (!batchRecords) {
+            pdfBatch = await request(`/api/batches/${batch.id}`);
+            batchRecords = pdfBatch.records ?? [];
+        }
+        if (!batchRecords.length) throw new Error('This folder has no label records to export.');
+        pdfProgress.value = { current: 0, total: batchRecords.length };
+        const images = [];
+        for (const record of batchRecords) {
+            images.push(await rasterizeLabelForPdf(record));
+            pdfProgress.value = { current: images.length, total: batchRecords.length };
+            // Yield so the progress indicator stays responsive during large workbooks.
+            await new Promise((resolve) => window.setTimeout(resolve, 0));
+        }
+        const pdf = buildTwoUpPdf(images);
+        const url = URL.createObjectURL(pdf);
+        const link = document.createElement('a');
+        const safeName = (pdfBatch.name || 'ogami-label').replace(/[<>:"/\\|?*\u0000-\u001F]/g, '-').trim() || 'ogami-label';
+        link.href = url;
+        link.download = `${safeName}-labels.pdf`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+        notify('success', 'PDF downloaded', `${images.length} labels from “${pdfBatch.name}” saved, two per A4 page (${Math.ceil(images.length / 2)} pages).`);
+    } catch (exception) {
+        notify('error', 'PDF download failed', exception.message || 'Could not create the PDF. Please try again.');
+    } finally {
+        pdfDownloading.value = false;
+        pdfBatchId.value = null;
+    }
+}
+
 onMounted(async () => {
     try { await refreshBatches(); } catch (exception) { error.value = exception.message; notify('error', 'Could not load History', exception.message); }
     try { deleteEnabled.value = (await request('/api/delete-status')).enabled; } catch { deleteEnabled.value = false; }
@@ -545,9 +690,10 @@ onBeforeUnmount(endCanvasInteraction);
         <article class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <div v-if="!visibleBatches.length" class="p-8 text-center text-sm text-slate-500">No matching uploads yet.</div>
           <div v-for="batch in visibleBatches" :key="batch.id" class="mb-3 overflow-hidden rounded-xl border border-slate-200">
-            <div class="flex items-center gap-2 bg-slate-50 p-2">
+            <div class="flex flex-wrap items-center gap-2 bg-slate-50 p-2">
               <button @click="toggleBatch(batch.id)" :aria-expanded="selectedBatch?.id===batch.id" class="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-2 text-left hover:bg-blue-50"><span class="min-w-0 flex-1"><b class="block truncate">📁 {{ batch.name }}</b><small class="mt-1 block truncate text-slate-500">{{ batch.row_count }} rows · {{ batch.original_filename }}</small></span><span class="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-lg text-slate-600">{{ selectedBatch?.id===batch.id?'⌄':'›' }}</span></button>
-              <button @click="deleteBatch(batch)" :disabled="!deleteEnabled||deletingId!==null" class="shrink-0 rounded-lg px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40" :title="deleteEnabled ? 'Delete this workbook folder and all its labels' : 'Sign in again to delete your data'">{{ deletingId===`batch-${batch.id}` ? 'Deleting…' : 'Delete folder' }}</button>
+              <button @click="downloadBatchPdf(batch)" :disabled="pdfDownloading||deletingId!==null" class="shrink-0 rounded-lg border border-indigo-200 bg-white px-2 py-2 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50" :title="`Download all ${batch.row_count} labels in this folder as a two-per-page PDF`">{{ pdfDownloading&&pdfBatchId===batch.id ? `Preparing ${pdfProgress.current}/${pdfProgress.total}…` : 'Download PDF' }}</button>
+              <button @click="deleteBatch(batch)" :disabled="!deleteEnabled||deletingId!==null||pdfDownloading" class="shrink-0 rounded-lg px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40" :title="deleteEnabled ? 'Delete this workbook folder and all its labels' : 'Sign in again to delete your data'">{{ deletingId===`batch-${batch.id}` ? 'Deleting…' : 'Delete folder' }}</button>
             </div>
             <div v-if="selectedBatch?.id===batch.id" class="max-h-[60vh] overflow-auto p-2">
               <div v-for="record in records" :key="record.id" class="flex items-center gap-1 border-b border-slate-100 hover:bg-blue-50" :class="selectedRecord?.id===record.id?'bg-blue-50':''">
@@ -559,7 +705,7 @@ onBeforeUnmount(endCanvasInteraction);
         </article>
         <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <template v-if="selectedRecord">
-            <div class="mb-4 flex flex-wrap items-center justify-between gap-3"><span class="text-sm text-slate-500">{{ selectedBatch?.name }} / Row {{ selectedRecord.row_number }} · {{ recordIndex+1 }} of {{ records.length }}</span><div class="flex flex-wrap gap-2"><button @click="moveRecord(-1)" :disabled="recordIndex<=0||downloading" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">‹ Previous</button><button @click="moveRecord(1)" :disabled="recordIndex>=records.length-1||downloading" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">Next ›</button><button @click="openEditor" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 font-medium text-indigo-800 hover:bg-indigo-100">Edit design</button><button @click="printLabel" class="rounded-lg border border-slate-300 bg-white px-3 py-2 font-medium text-slate-700 hover:bg-slate-50">Print label</button><button @click="downloadLabel(selectedRecord)" :disabled="downloading" class="rounded-lg bg-blue-600 px-3 py-2 text-white disabled:opacity-50">{{ downloading ? 'Preparing PNG…' : 'Download PNG' }}</button></div></div>
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-3"><span class="text-sm text-slate-500">{{ selectedBatch?.name }} / Row {{ selectedRecord.row_number }} · {{ recordIndex+1 }} of {{ records.length }}</span><div class="flex flex-wrap gap-2"><button @click="moveRecord(-1)" :disabled="recordIndex<=0||downloading||pdfDownloading" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">‹ Previous</button><button @click="moveRecord(1)" :disabled="recordIndex>=records.length-1||downloading||pdfDownloading" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">Next ›</button><button @click="openEditor" :disabled="pdfDownloading" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50">Edit design</button><button @click="printLabel" :disabled="pdfDownloading" class="rounded-lg border border-slate-300 bg-white px-3 py-2 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">Print label</button><button @click="downloadLabel(selectedRecord)" :disabled="downloading||pdfDownloading" class="rounded-lg bg-blue-600 px-3 py-2 text-white disabled:opacity-50">{{ downloading ? 'Preparing PNG…' : 'Download PNG' }}</button></div></div>
             <p class="mb-2 text-xs text-slate-500">Label preview · Row {{ selectedRecord.row_number }} · Serial no. {{ selectedRecord.serial_no }}</p>
             <img ref="labelImage" :key="selectedRecord.id" :src="labelUrl(selectedRecord)" class="mx-auto block w-full max-w-[900px]" alt="Accurately encoded Ogami product label" />
             <div class="print-label" aria-hidden="true"><img :src="labelUrl(selectedRecord)" alt="" /></div>
