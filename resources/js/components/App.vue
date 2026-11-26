@@ -1,5 +1,32 @@
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue';
+import Swal from 'sweetalert2';
+import 'sweetalert2/dist/sweetalert2.min.css';
+
+const toast = Swal.mixin({
+    toast: true,
+    position: 'top-end',
+    showConfirmButton: false,
+    timer: 3800,
+    timerProgressBar: true,
+});
+function notify(icon, title, text = '') {
+    return toast.fire({ icon, title, text });
+}
+async function confirmDelete(title, text, confirmButtonText) {
+    const result = await Swal.fire({
+        title,
+        text,
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText,
+        cancelButtonText: 'Cancel',
+        confirmButtonColor: '#dc2626',
+        reverseButtons: true,
+        focusCancel: true,
+    });
+    return result.isConfirmed;
+}
 
 const batches = ref([]);
 const selectedBatch = ref(null);
@@ -122,12 +149,13 @@ async function upload() {
         selectedBatch.value = saved;
         selectedRecord.value = saved.records?.[0] ?? null;
         success.value = { name: batchName.value || file.value.name.replace(/\.[^.]+$/, ''), filename: saved.original_filename, count: result.batches.reduce((total, batch) => total + batch.row_count, 0), batchCount: result.batches.length };
+        notify('success', 'Upload complete', `${success.value.count} label record(s) saved to History.`);
         file.value = null;
         batchName.value = '';
         analysis.value = null; selectedTableIds.value = []; codeTypes.value = {}; draftTemplates.value = {};
         if (fileInput.value) fileInput.value.value = '';
         activePage.value = 'history';
-    } catch (exception) { error.value = exception.message; }
+    } catch (exception) { error.value = exception.message; notify('error', 'Upload failed', exception.message); }
     finally { loading.value = false; }
 }
 async function analyzeWorkbook() {
@@ -139,7 +167,8 @@ async function analyzeWorkbook() {
         selectRecommendedTables();
         draftTemplates.value = {};
         if (selectedTables.value.length && selectedTables.value.every((table) => table.legacyFormat)) await upload();
-    } catch (exception) { error.value = exception.message; }
+        else notify('success', 'Analysis complete', `${analysis.value.tables.length} table(s) found. Choose a table and create its label design.`);
+    } catch (exception) { error.value = exception.message; notify('error', 'Analysis failed', exception.message); }
     finally { analyzing.value = false; }
 }
 function onFileChange(event) {
@@ -165,7 +194,7 @@ async function openBatch(id) {
         selectedBatch.value = await request(`/api/batches/${id}`);
         if (!selectedBatch.value.records?.some((record) => record.id === selectedRecord.value?.id)) selectedRecord.value = selectedBatch.value.records?.[0] ?? null;
     }
-    catch (exception) { error.value = exception.message; }
+    catch (exception) { error.value = exception.message; notify('error', 'Could not open folder', exception.message); }
 }
 function toggleBatch(id) {
     if (selectedBatch.value?.id === id) { selectedBatch.value = null; selectedRecord.value = null; return; }
@@ -201,7 +230,7 @@ function canvasDrop(event) {
 async function saveTemplate() {
     if (draftDesignMode.value) {
         templateError.value = '';
-        if (!designTable.value || !templateElements.value.length) { templateError.value = 'Add at least one text, barcode, QR code, or border element to the canvas.'; return; }
+        if (!designTable.value || !templateElements.value.length) { templateError.value = 'Add at least one text, barcode, QR code, or border element to the canvas.'; notify('warning', 'Your canvas is empty', 'Add at least one design element before continuing.'); return; }
         draftTemplates.value[designTable.value.id] = { elements: structuredClone(templateElements.value) };
         if (designTableIndex.value + 1 < designTables.value.length) {
             designTableIndex.value += 1;
@@ -221,11 +250,13 @@ async function saveTemplate() {
         selectedBatch.value = updated;
         selectedRecord.value = updated.records?.find((row) => row.id === selectedRecord.value?.id) ?? updated.records?.[0] ?? null;
         templateMessage.value = 'Design saved for this workbook.';
-    } catch (exception) { templateError.value = exception.message; }
+        notify('success', 'Design saved', 'The label design was updated for this workbook.');
+    } catch (exception) { templateError.value = exception.message; notify('error', 'Could not save design', exception.message); }
     finally { templateSaving.value = false; }
 }
 async function deleteBatch(batch) {
-    if (!deleteEnabled.value || deletingId.value || !window.confirm(`Delete “${batch.name}” and all ${batch.row_count} label records? This cannot be undone.`)) return;
+    if (!deleteEnabled.value || deletingId.value) return;
+    if (!await confirmDelete('Delete this folder?', `“${batch.name}” and all ${batch.row_count} label record(s) will be permanently deleted.`, 'Delete folder')) return;
     deletingId.value = `batch-${batch.id}`;
     historyError.value = '';
     historyMessage.value = '';
@@ -237,11 +268,13 @@ async function deleteBatch(batch) {
         }
         await refreshBatches();
         historyMessage.value = `Workbook folder “${batch.name}” and its labels were deleted.`;
-    } catch (exception) { historyError.value = exception.message; }
+        notify('success', 'Folder deleted', 'The workbook and its labels were removed.');
+    } catch (exception) { historyError.value = exception.message; notify('error', 'Could not delete folder', exception.message); }
     finally { deletingId.value = null; }
 }
 async function deleteRecord(record) {
-    if (!deleteEnabled.value || deletingId.value || !window.confirm(`Delete the label for Row ${record.row_number}? This cannot be undone.`)) return;
+    if (!deleteEnabled.value || deletingId.value) return;
+    if (!await confirmDelete('Delete this label?', `The label for Row ${record.row_number} will be permanently deleted.`, 'Delete label')) return;
     const batchId = selectedBatch.value?.id;
     const previousIndex = recordIndex.value;
     const deletingSelectedRecord = selectedRecord.value?.id === record.id;
@@ -261,7 +294,8 @@ async function deleteRecord(record) {
         }
         await refreshBatches();
         historyMessage.value = `Row ${record.row_number} label was deleted.`;
-    } catch (exception) { historyError.value = exception.message; }
+        notify('success', 'Label deleted', `Row ${record.row_number} was removed from this workbook.`);
+    } catch (exception) { historyError.value = exception.message; notify('error', 'Could not delete label', exception.message); }
     finally { deletingId.value = null; }
 }
 function logout() {
@@ -312,15 +346,17 @@ async function downloadLabel(record) {
         link.click();
         link.remove();
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        notify('success', 'PNG downloaded', `Row ${record.row_number} label is saved to your downloads.`);
     } catch (exception) {
         downloadError.value = 'Could not create the PNG image. Please wait for the label to load and try again.';
+        notify('error', 'PNG download failed', exception.message || downloadError.value);
     } finally {
         downloading.value = false;
     }
 }
 
 onMounted(async () => {
-    try { await refreshBatches(); } catch (exception) { error.value = exception.message; }
+    try { await refreshBatches(); } catch (exception) { error.value = exception.message; notify('error', 'Could not load History', exception.message); }
     try { deleteEnabled.value = (await request('/api/delete-status')).enabled; } catch { deleteEnabled.value = false; }
 });
 </script>
