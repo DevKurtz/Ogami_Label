@@ -182,8 +182,7 @@ async function analyzeWorkbook() {
         analysis.value = await request('/api/analyze', { method: 'POST', body: form });
         selectRecommendedTables();
         draftTemplates.value = {};
-        if (selectedTables.value.length && selectedTables.value.every((table) => table.legacyFormat)) await upload();
-        else notify('success', 'Analysis complete', `${analysis.value.tables.length} table(s) found. Choose a table and create its label design.`);
+        notify('success', 'Analysis complete', `${analysis.value.tables.length} table(s) found. Review the selection, then click Upload and generate labels.`);
     } catch (exception) { error.value = exception.message; notify('error', 'Analysis failed', exception.message); }
     finally { analyzing.value = false; }
 }
@@ -469,7 +468,7 @@ onBeforeUnmount(endCanvasInteraction);
           </div>
           <button v-if="file && !analysis" :disabled="analyzing" @click="analyzeWorkbook" class="mt-4 rounded-lg border border-blue-300 bg-blue-50 px-4 py-2.5 font-semibold text-blue-800 disabled:opacity-50">{{ analyzing ? 'Analyzing workbook…' : 'Upload & analyze Excel' }}</button>
           <div v-if="analysis" class="mt-4 space-y-4 rounded-xl border border-blue-100 bg-blue-50/60 p-4">
-            <div class="flex flex-wrap items-center gap-2"><div class="mr-auto"><h3 class="font-bold">Workbook analysis</h3><p class="mt-1 text-sm text-slate-600">Found {{ analysis.sheets.length }} worksheet(s) with label data and {{ analysis.tables.length }} label table(s). Standard Ogami files generate labels automatically; other formats open a blank design canvas for each selected table.</p></div><button @click="selectAllTables" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold">Select all</button><button @click="selectNoTables" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold">Clear</button></div>
+            <div class="flex flex-wrap items-center gap-2"><div class="mr-auto"><h3 class="font-bold">Workbook analysis</h3><p class="mt-1 text-sm text-slate-600">Found {{ analysis.sheets.length }} worksheet(s) with label data and {{ analysis.tables.length }} label table(s). Analysis only previews the workbook; labels are generated after you click Upload. Other formats open a blank design canvas for each selected table.</p></div><button @click="selectAllTables" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold">Select all</button><button @click="selectNoTables" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-semibold">Clear</button></div>
             <p v-if="!analysis.tables.length" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">No table with a header and data rows was detected. Check that the table has column names in its first row.</p>
             <div v-else class="max-h-[520px] space-y-3 overflow-auto pr-1">
               <article v-for="table in analysis.tables" :key="table.id" class="rounded-xl border bg-white p-3" :class="selectedTableIds.includes(table.id)?'border-blue-400 ring-1 ring-blue-200':'border-slate-200'">
@@ -490,7 +489,7 @@ onBeforeUnmount(endCanvasInteraction);
           </button>
           <p v-if="loading" role="status" class="mt-3 text-sm text-blue-700">Uploading and validating your file. Keep this page open; confirmation will appear once it has been saved.</p>
         </article>
-        <article class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-lg font-bold">Upload → Design → Records</h2><p class="mt-3 text-sm leading-6 text-slate-600">The familiar Ogami spreadsheet format goes straight to History with the original label layout. For a different format, choose which detected tables to use, select barcode or QR for code columns, then build a label from a blank canvas. Each selected table gets its own design.</p><p class="mt-4 rounded-lg bg-slate-50 p-4 text-sm text-slate-600">Nothing is generated as a sample design. Add only the text, fields, barcodes, QR codes, and borders you want.</p></article>
+        <article class="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm"><h2 class="text-lg font-bold">Upload → Design → Records</h2><p class="mt-3 text-sm leading-6 text-slate-600">Analyzing a workbook never creates records. For the familiar Ogami format, review the table and click Upload and generate labels to use the original label layout. For a different format, choose which detected tables to use, select barcode or QR for code columns, then build a label from a blank canvas. Each selected table gets its own design.</p><p class="mt-4 rounded-lg bg-slate-50 p-4 text-sm text-slate-600">Nothing is generated as a sample design. Add only the text, fields, barcodes, QR codes, and borders you want.</p></article>
       </section>
 
       <section v-if="activePage==='history'" class="space-y-4">
