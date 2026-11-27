@@ -93,7 +93,11 @@ class LabelController extends Controller
                 preg_match('/viewBox="([^"]+)"/', $raw, $bounds);
                 $inner = preg_replace('/^.*?<svg[^>]*>|<\/svg>.*$/s', '', $raw) ?? '';
                 $inner = preg_replace('/<\?xml[^>]*>|<!DOCTYPE[^>]*>/i', '', $inner) ?? $inner;
-                return sprintf('<svg x="%d" y="%d" width="%d" height="%d" viewBox="%s"><title>%s</title>%s</svg>', $x, $y, $width, $height, e($bounds[1] ?? '0 0 1 1'), e($code), $inner);
+                $viewBox = preg_split('/\s+/', trim($bounds[1] ?? '0 0 1 1'));
+                $quietZone = 20; // 10 narrow modules on either side, required for reliable scanning.
+                if (count($viewBox) === 4) $viewBox[2] = (float) $viewBox[2] + 2 * $quietZone;
+                $paddedViewBox = implode(' ', $viewBox);
+                return sprintf('<svg x="%d" y="%d" width="%d" height="%d" viewBox="%s"><title>%s</title><g transform="translate(%d 0)">%s</g></svg>', $x, $y, $width, $height, e($paddedViewBox), e($code), $quietZone, $inner);
             } catch (\Throwable) {
                 return '';
             }
@@ -157,6 +161,7 @@ class LabelController extends Controller
                 }
                 $field = (string) ($element['field'] ?? '');
                 $value = $field === '' ? (string) ($element['label'] ?? '') : (string) ($data[$field] ?? collect($data['customFields'] ?? [])->firstWhere('name', $field)['value'] ?? '');
+                if ($field === 'mfgDate') $value = $this->formatMfgDateForLabel($value);
                 $type = $element['type'] ?? 'text';
                 // Keep legacy serial bars inside the serial cell with even side margins.
                 // Older saved templates extended this barcode right to the cell border.
@@ -234,7 +239,7 @@ class LabelController extends Controller
         $svg[] = $text(8,314,'SUPPLIER NUMBER',17,'start','supplier'); $svg[] = $text(8,340,'(V)',17,'start','supplier'); $svg[] = $text(200,344,$data['supplierNumber'] ?? '',22,'middle','supplier',230);
         $supplierCode = (string) ($data['supplierCode'] ?? '');
         $svg[] = '<g clip-path="url(#clip-supplier)">'.$barcode($supplierCode,35,354,190,36,$legacyBarcodeType($supplierCode)).'</g>'; $supplierCaption = $legacyBarcodeCaption($supplierCode); $svg[] = sprintf('<text x="130" y="396" text-anchor="middle" font-family="Arial,sans-serif" font-size="10"%s clip-path="url(#clip-supplier)">%s</text>', $supplierCaption !== '' && $legacyBarcodeType($supplierCode) === $generator::TYPE_CODE_39 ? ' textLength="190" lengthAdjust="spacing"' : '', e($supplierCaption));
-        $svg[] = $text(260,314,'MFG DAT',17,'start','date'); $svg[] = $text(400,343,$data['mfgDate'] ?? '',25,'middle','date',270);
+        $svg[] = $text(260,314,'MFG DAT',17,'start','date'); $svg[] = $text(400,343,$this->formatMfgDateForLabel((string) ($data['mfgDate'] ?? '')),25,'middle','date',270);
         $svg[] = $text(552,314,'SUPPLIER PN',17,'start','supplier-pn'); $svg[] = $text(552,348,'(2P)',17,'start','supplier-pn');
         $svg[] = $text(8,430,'SERIAL NO',17,'start','serial'); $svg[] = $text(8,456,'(S)',17,'start','serial'); $svg[] = $text(219,460,$data['serialNo'] ?? '',22,'middle','serial',405);
         $serialCode = (string) ($data['serialCode'] ?? '');
@@ -247,6 +252,23 @@ class LabelController extends Controller
             // A record has an immutable id, so the generated vector can be reused safely by this user's browser.
             'Cache-Control' => 'private, max-age=86400, immutable',
         ]);
+    }
+
+    private function formatMfgDateForLabel(string $value): string
+    {
+        $value = trim($value);
+        if (preg_match('/^(\d{4})(\d{2})(\d{2})$/', $value, $date)) {
+            return sprintf('%04d/%02d/%02d', $date[1], $date[2], $date[3]);
+        }
+        if (preg_match('/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/', $value, $date)) {
+            return sprintf('%04d/%02d/%02d', $date[1], $date[2], $date[3]);
+        }
+        if (preg_match('/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2}|\d{4})$/', $value, $date)) {
+            $year = (int) $date[3];
+            if (strlen($date[3]) === 2) $year += $year < 70 ? 2000 : 1900;
+            return sprintf('%04d/%02d/%02d', $year, $date[2], $date[1]);
+        }
+        return $value;
     }
 }
 

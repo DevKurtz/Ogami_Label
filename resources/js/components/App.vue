@@ -514,7 +514,7 @@ async function downloadLabel(record) {
     }
 }
 
-async function rasterizeLabelForPdf(record, svgMarkup, width = 2300) {
+async function rasterizeLabelForPdf(record, svgMarkup, width = 1500) {
     const image = new Image();
     image.decoding = 'async';
     const svgUrl = URL.createObjectURL(new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' }));
@@ -546,7 +546,9 @@ async function rasterizeLabelForPdf(record, svgMarkup, width = 2300) {
     context.fillStyle = '#fff';
     context.fillRect(0, 0, width, height);
     context.drawImage(image, 0, 0, width, height);
-    // Let the browser's native encoder compress the 337-DPI label instead of copying
+    // Render at 218 DPI, enough for sharp printed codes while avoiding unnecessary
+    // pixel work and large intermediate images at the old 337-DPI setting.
+    // Let the browser's native encoder compress the label instead of copying
     // millions of pixels through JavaScript and deflating them by hand.
     const jpeg = await new Promise((resolve, reject) => canvas.toBlob(
         (blob) => blob ? resolve(blob) : reject(new Error('The browser could not encode a label image for the PDF.')),
