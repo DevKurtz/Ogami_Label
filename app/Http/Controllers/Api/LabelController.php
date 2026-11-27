@@ -89,7 +89,16 @@ class LabelController extends Controller
             $hasQrElement = collect($elements)->contains(fn ($element) => ($element['type'] ?? '') === 'qr');
             $looksLikeOgamiLayout = collect($elements)->filter(fn ($element) => in_array($element['field'] ?? '', ['partNumber', 'quantity', 'partName', 'modelName', 'serialNo'], true))->count() >= 3;
             $svg = ['<svg xmlns="http://www.w3.org/2000/svg" width="152mm" height="107mm" viewBox="0 0 760 535"><defs>'];
-            foreach ($elements as $index => $element) $svg[] = sprintf('<clipPath id="element-clip-%d"><rect x="%s" y="%s" width="%s" height="%s"/></clipPath>', $index, max(0,(float)($element['x']??0)), max(0,(float)($element['y']??0)), max(20,(float)($element['w']??200)), max(20,(float)($element['h']??40)));
+            foreach ($elements as $index => $element) {
+                $clipX = max(0, (float) ($element['x'] ?? 0));
+                $clipY = max(0, (float) ($element['y'] ?? 0));
+                $clipW = max(20, (float) ($element['w'] ?? 200));
+                $clipH = max(20, (float) ($element['h'] ?? 40));
+                if ($isLegacyLayout && ($element['type'] ?? '') === 'text' && ($element['field'] ?? '') === 'partNumber' && $clipY < 150) {
+                    $clipX = 0; $clipY = 0; $clipW = 535; $clipH = 150;
+                }
+                $svg[] = sprintf('<clipPath id="element-clip-%d"><rect x="%s" y="%s" width="%s" height="%s"/></clipPath>', $index, $clipX, $clipY, $clipW, $clipH);
+            }
             $svg[] = '</defs>';
             foreach ($elements as $elementIndex => $element) {
                 $x = max(0, min(760, (float) ($element['x'] ?? 0)));
@@ -103,6 +112,8 @@ class LabelController extends Controller
                 $field = (string) ($element['field'] ?? '');
                 $value = $field === '' ? (string) ($element['label'] ?? '') : (string) ($data[$field] ?? collect($data['customFields'] ?? [])->firstWhere('name', $field)['value'] ?? '');
                 $type = $element['type'] ?? 'text';
+                $centerPartNumber = $isLegacyLayout && $type === 'text' && $field === 'partNumber' && $y < 150;
+                if ($centerPartNumber) { $x = 0; $w = 535; }
                 if ($type === 'qr' && trim($value) === '') $value = $qrValue;
                 if ($type === 'qr' && trim($value) !== '') {
                     $svg[] = '<g clip-path="url(#element-clip-'.$elementIndex.')">'.$renderQr($value, $x, $y, $w, $h).'</g>';
@@ -128,7 +139,7 @@ class LabelController extends Controller
                 $display = $type === 'text' && $field !== '' ? $value : trim((string) ($element['label'] ?? '')) . ($value !== '' ? ($field !== '' && ($element['label'] ?? '') !== '' ? ': ' : '') . $value : '');
                 $baseline = min(535, $y + min($h - 2, $size + 4));
                 $align = in_array($element['align'] ?? 'left', ['left', 'center', 'right'], true) ? ($element['align'] ?? 'left') : 'left';
-                if ($isLegacyLayout && $type === 'text' && $field === 'partNumber' && $y < 150) $align = 'center';
+                if ($centerPartNumber) $align = 'center';
                 $textX = $align === 'center' ? $x + $w / 2 : ($align === 'right' ? $x + $w - 3 : $x + 3);
                 $svg[] = sprintf('<text x="%s" y="%s" text-anchor="%s" font-family="Arial,sans-serif" font-size="%.2f" clip-path="url(#element-clip-%d)">%s</text>', $textX, $baseline, $align === 'left' ? 'start' : ($align === 'right' ? 'end' : 'middle'), $size, $elementIndex, e($display));
             }
@@ -139,7 +150,7 @@ class LabelController extends Controller
 
             return response(implode('', $svg), 200, ['Content-Type' => 'image/svg+xml; charset=utf-8', 'Cache-Control' => 'private, max-age=86400, immutable']);
         }
-        $svg[] = $text(8,27,'PART NO.',17,'start','part'); $svg[] = $text(8,47,'(P)',17,'start','part'); $svg[] = $text(267,69,$data['partNumber'] ?? '',62,'middle','part',510);
+        $svg[] = $text(8,27,'PART NO.',17,'start','part'); $svg[] = $text(8,47,'(P)',17,'start','part'); $svg[] = $text(267.5,69,$data['partNumber'] ?? '',62,'middle','part',510);
         $svg[] = '<g clip-path="url(#clip-part)">'.$barcode($data['partNumberCode'] ?? '',110,83,420,50).'</g>'; $svg[] = $text(320,146,$data['partNumberCode'] ?? '',10,'middle','part',420);
         if ($qrMarkup !== '') $svg[] = '<g clip-path="url(#clip-qr)">'.$qrMarkup.'</g>';
         $svg[] = $text(8,171,'QUANTITY',17,'start','quantity'); $svg[] = $text(8,194,'(Q)',17,'start','quantity'); $svg[] = $text(130,231,$data['quantity'] ?? '',55,'middle','quantity',230);

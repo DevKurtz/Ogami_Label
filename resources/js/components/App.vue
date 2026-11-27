@@ -32,6 +32,9 @@ async function confirmDelete(title, text, confirmButtonText) {
 const batches = ref([]);
 const selectedBatch = ref(null);
 const selectedRecord = ref(null);
+const loadingBatchId = ref(null);
+const loadingRecordId = ref(null);
+let recordDetailRequestId = 0;
 const file = ref(null);
 const fileInput = ref(null);
 const batchName = ref('');
@@ -217,17 +220,41 @@ function clearFile(input) {
     if (input) input.value = '';
 }
 async function openBatch(id) {
+    const summary = batches.value.find((batch) => batch.id === id);
+    selectedBatch.value = { ...(summary ?? { id }), records: [] };
+    selectedRecord.value = null;
+    loadingBatchId.value = id;
     try {
-        selectedBatch.value = await request(`/api/batches/${id}`);
-        if (!selectedBatch.value.records?.some((record) => record.id === selectedRecord.value?.id)) selectedRecord.value = selectedBatch.value.records?.[0] ?? null;
+        const batch = await request(`/api/batches/${id}`);
+        if (selectedBatch.value?.id !== id) return;
+        selectedBatch.value = batch;
+        const firstRecord = batch.records?.[0] ?? null;
+        if (firstRecord) selectRecord(firstRecord);
     }
-    catch (exception) { error.value = exception.message; notify('error', 'Could not open folder', exception.message); }
+    catch (exception) {
+        if (selectedBatch.value?.id === id) { selectedBatch.value = null; selectedRecord.value = null; }
+        error.value = exception.message; notify('error', 'Could not open folder', exception.message);
+    }
+    finally { if (loadingBatchId.value === id) loadingBatchId.value = null; }
 }
 function toggleBatch(id) {
-    if (selectedBatch.value?.id === id) { selectedBatch.value = null; selectedRecord.value = null; return; }
+    if (selectedBatch.value?.id === id) {
+        selectedBatch.value = null; selectedRecord.value = null; loadingBatchId.value = null;
+        loadingRecordId.value = null; recordDetailRequestId++;
+        return;
+    }
     openBatch(id);
 }
-function selectRecord(record) { selectedRecord.value = record; }
+function selectRecord(record) {
+    selectedRecord.value = record;
+    if (record.data) return;
+    const requestId = ++recordDetailRequestId;
+    loadingRecordId.value = record.id;
+    request(`/api/records/${record.id}`)
+        .then((details) => { if (requestId === recordDetailRequestId && selectedRecord.value?.id === record.id) selectedRecord.value = details; })
+        .catch((exception) => { if (requestId === recordDetailRequestId) notify('error', 'Could not load row details', exception.message); })
+        .finally(() => { if (requestId === recordDetailRequestId) loadingRecordId.value = null; });
+}
 function makeLegacyTemplate() {
     let index = 0;
     const elements = [];
@@ -237,7 +264,7 @@ function makeLegacyTemplate() {
     const barcode = (field, x, y, w, h) => add('barcode', field, '', x, y, w, h);
 
     [[0,0,535,150],[535,0,225,150],[0,150,265,140],[265,150,270,70],[535,150,225,70],[265,220,270,70],[535,220,225,70],[0,290,265,115],[265,290,270,115],[535,290,225,115],[0,405,470,130],[470,405,290,130]].forEach((cell) => box(...cell));
-    text('', 'PART NO.', 8, 11, 150, 22, 17); text('', '(P)', 8, 31, 60, 22, 17); text('partNumber', '', 100, 20, 335, 52, 62, 'center');
+    text('', 'PART NO.', 8, 11, 150, 22, 17); text('', '(P)', 8, 31, 60, 22, 17); text('partNumber', '', 0, 20, 535, 52, 62, 'center');
     barcode('partNumberCode', 110, 83, 420, 50); text('partNumberCode', '', 110, 136, 420, 13, 10); add('qr', 'qrCode', '', 600, 8, 145, 135);
     text('', 'QUANTITY', 8, 154, 180, 22, 17); text('', '(Q)', 8, 177, 60, 22, 17); text('quantity', '', 40, 180, 190, 49, 55);
     barcode('quantityCode', 38, 240, 188, 31); text('quantityCode', '', 38, 270, 188, 12, 10);
@@ -277,7 +304,11 @@ function openEditor() {
     const isLegacyLayout = templateElements.value.some((element) => String(element.id ?? '').startsWith('legacy-'));
     if (isLegacyLayout) {
         templateElements.value.forEach((element) => {
-            if (element.type === 'text' && element.field === 'partNumber' && Number(element.y) < 150) element.align = 'center';
+            if (element.type === 'text' && element.field === 'partNumber' && Number(element.y) < 150) {
+                element.x = 0;
+                element.w = 535;
+                element.align = 'center';
+            }
         });
     }
     editingTextId.value = null;
@@ -408,9 +439,9 @@ async function deleteRecord(record) {
             selectedBatch.value = updatedBatch;
             batches.value = batches.value.map((item) => item.id === batchId ? { ...item, row_count: remainingRecords.length } : item);
             if (deletingSelectedRecord) {
-                selectedRecord.value = remainingRecords[Math.min(previousIndex, remainingRecords.length - 1)] ?? null;
-            } else {
-                selectedRecord.value = remainingRecords.find((item) => item.id === selectedRecord.value?.id) ?? null;
+                selectedRecord.value = null;
+                const nextRecord = remainingRecords[Math.min(previousIndex, remainingRecords.length - 1)] ?? null;
+                if (nextRecord) selectRecord(nextRecord);
             }
         }
         historyMessage.value = `Row ${record.row_number} label was deleted.`;
@@ -431,9 +462,10 @@ function logout() {
     form.submit();
 }
 function moveRecord(step) {
-    const next = records.value[recordIndex.value + step]; if (next) selectedRecord.value = next;
+    const next = records.value[recordIndex.value + step]; if (next) selectRecord(next);
 }
-function labelUrl(record) { return `/api/records/${record.id}/label.svg?v=${encodeURIComponent(selectedBatch.value?.updated_at ?? record.updated_at ?? '')}`; }
+const labelRenderRevision = new URL(import.meta.url).pathname.split('/').pop() ?? 'app';
+function labelUrl(record) { return `/api/records/${record.id}/label.svg?v=${encodeURIComponent(selectedBatch.value?.updated_at ?? record.updated_at ?? '')}&r=${encodeURIComponent(labelRenderRevision)}`; }
 function onLabelImageLoad() { labelImageLoading.value = false; labelImageFailed.value = false; }
 function onLabelImageError() { labelImageLoading.value = false; labelImageFailed.value = true; }
 watch(() => selectedRecord.value?.id, (id) => {
@@ -733,11 +765,12 @@ onBeforeUnmount(endCanvasInteraction);
           <div v-for="batch in visibleBatches" :key="batch.id" class="mb-3 overflow-hidden rounded-xl border border-slate-200">
             <div class="flex flex-wrap items-center gap-2 bg-slate-50 p-2">
               <button @click="toggleBatch(batch.id)" :aria-expanded="selectedBatch?.id===batch.id" class="flex min-w-0 flex-1 items-center gap-3 rounded-lg p-2 text-left hover:bg-blue-50"><span class="min-w-0 flex-1"><b class="block truncate">📁 {{ batch.name }}</b><small class="mt-1 block truncate text-slate-500">{{ batch.row_count }} rows · {{ batch.original_filename }}</small></span><span class="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-lg text-slate-600">{{ selectedBatch?.id===batch.id?'⌄':'›' }}</span></button>
-              <button @click="downloadBatchPdf(batch)" :disabled="pdfDownloading||deletingId!==null" class="shrink-0 rounded-lg border border-indigo-200 bg-white px-2 py-2 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50" :title="`Download all ${batch.row_count} labels in this folder as a two-per-page PDF`">Download PDF</button>
+              <button @click="downloadBatchPdf(batch)" :disabled="pdfDownloading||deletingId!==null||loadingBatchId===batch.id" class="shrink-0 rounded-lg border border-indigo-200 bg-white px-2 py-2 text-xs font-semibold text-indigo-800 hover:bg-indigo-50 disabled:cursor-not-allowed disabled:opacity-50" :title="`Download all ${batch.row_count} labels in this folder as a two-per-page PDF`">Download PDF</button>
               <button @click="deleteBatch(batch)" :disabled="!deleteEnabled||deletingId!==null||pdfDownloading" class="shrink-0 rounded-lg px-2 py-2 text-sm font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40" :title="deleteEnabled ? 'Delete this workbook folder and all its labels' : 'Sign in again to delete your data'">Delete folder</button>
             </div>
             <div v-if="selectedBatch?.id===batch.id" class="max-h-[60vh] overflow-auto p-2">
-              <div v-for="record in records" :key="record.id" class="flex items-center gap-1 border-b border-slate-100 hover:bg-blue-50" :class="selectedRecord?.id===record.id?'bg-blue-50':''">
+              <div v-if="loadingBatchId===batch.id" role="status" class="flex items-center justify-center gap-2 rounded-lg bg-blue-50 px-4 py-6 text-sm text-blue-800"><span class="h-4 w-4 animate-spin rounded-full border-2 border-blue-200 border-t-blue-700" aria-hidden="true"></span>Loading rows…</div>
+              <div v-else v-for="record in records" :key="record.id" class="flex items-center gap-1 border-b border-slate-100 hover:bg-blue-50" :class="selectedRecord?.id===record.id?'bg-blue-50':''">
                 <button @click="selectRecord(record)" class="flex min-w-0 flex-1 items-center justify-between px-3 py-3 text-left"><span class="min-w-0"><b>Row {{ record.row_number }}</b><small class="mt-1 block truncate text-slate-500">{{ record.serial_no }} · {{ record.part_number }}</small></span><span class="text-xs text-blue-600">Open label ›</span></button>
                 <button @click="deleteRecord(record)" :disabled="!deleteEnabled||deletingId!==null" class="inline-flex shrink-0 items-center gap-2 rounded-lg px-2 py-2 text-xs font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40" :title="deleteEnabled ? 'Delete this label record' : 'Sign in again to delete your data'"><span v-if="deletingId===`record-${record.id}`" class="h-3 w-3 animate-spin rounded-full border-2 border-red-200 border-t-red-700" aria-hidden="true"></span>{{ deletingId===`record-${record.id}` ? 'Deleting…' : 'Delete' }}</button>
               </div>
@@ -746,7 +779,7 @@ onBeforeUnmount(endCanvasInteraction);
         </article>
         <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <template v-if="selectedRecord">
-            <div class="mb-4 flex flex-wrap items-center justify-between gap-3"><span class="text-sm text-slate-500">{{ selectedBatch?.name }} / Row {{ selectedRecord.row_number }} · {{ recordIndex+1 }} of {{ records.length }}</span><div class="flex flex-wrap gap-2"><button @click="moveRecord(-1)" :disabled="recordIndex<=0||downloading||pdfDownloading" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">‹ Previous</button><button @click="moveRecord(1)" :disabled="recordIndex>=records.length-1||downloading||pdfDownloading" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">Next ›</button><button @click="openEditor" :disabled="pdfDownloading" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50">Edit design</button><button @click="printLabel" :disabled="pdfDownloading" class="rounded-lg border border-slate-300 bg-white px-3 py-2 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">Print label</button><button @click="downloadLabel(selectedRecord)" :disabled="downloading||pdfDownloading||labelImageLoading||labelImageFailed" class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-white disabled:opacity-50"><span v-if="downloading" class="h-4 w-4 animate-spin rounded-full border-2 border-blue-200 border-t-white" aria-hidden="true"></span>{{ downloading ? 'Preparing PNG…' : 'Download PNG' }}</button></div></div>
+            <div class="mb-4 flex flex-wrap items-center justify-between gap-3"><span class="text-sm text-slate-500">{{ selectedBatch?.name }} / Row {{ selectedRecord.row_number }} · {{ recordIndex+1}} of {{ records.length }}</span><div class="flex flex-wrap gap-2"><button @click="moveRecord(-1)" :disabled="recordIndex<=0||downloading||pdfDownloading||loadingRecordId!==null" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">‹ Previous</button><button @click="moveRecord(1)" :disabled="recordIndex>=records.length-1||downloading||pdfDownloading||loadingRecordId!==null" class="rounded-lg bg-slate-100 px-3 py-2 disabled:opacity-40">Next ›</button><button @click="openEditor" :disabled="pdfDownloading||loadingRecordId!==null" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 font-medium text-indigo-800 hover:bg-indigo-100 disabled:opacity-50">Edit design</button><button @click="printLabel" :disabled="pdfDownloading" class="rounded-lg border border-slate-300 bg-white px-3 py-2 font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-50">Print label</button><button @click="downloadLabel(selectedRecord)" :disabled="downloading||pdfDownloading||labelImageLoading||labelImageFailed" class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-white disabled:opacity-50"><span v-if="downloading" class="h-4 w-4 animate-spin rounded-full border-2 border-blue-200 border-t-white" aria-hidden="true"></span>{{ downloading ? 'Preparing PNG…' : 'Download PNG' }}</button></div></div>
             <p class="mb-2 text-xs text-slate-500">Label preview · Row {{ selectedRecord.row_number }} · Serial no. {{ selectedRecord.serial_no }}</p>
             <div class="relative mx-auto min-h-[180px] w-full max-w-[900px]" aria-live="polite">
               <div v-if="labelImageLoading" class="absolute inset-0 z-10 grid min-h-[180px] place-items-center rounded-lg border border-slate-200 bg-white/90 text-sm text-slate-600"><span class="flex items-center gap-3"><span class="h-5 w-5 animate-spin rounded-full border-2 border-blue-200 border-t-blue-600" aria-hidden="true"></span>Loading label image…</span></div>

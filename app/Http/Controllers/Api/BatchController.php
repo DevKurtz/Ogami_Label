@@ -37,8 +37,18 @@ class BatchController extends Controller
     public function show(Request $request, WorkbookBatch $batch): JsonResponse
     {
         $ownedBatch = $request->user()->batches()->whereKey($batch->getKey())->firstOrFail();
+        $ownedBatch->setRelation('records', $ownedBatch->records()
+            ->orderBy('row_number')
+            ->get(['id', 'batch_id', 'row_number', 'serial_no', 'part_number']));
 
-        return response()->json($ownedBatch->load(['records' => fn ($query) => $query->orderBy('row_number')]));
+        return response()->json($ownedBatch);
+    }
+
+    public function showRecord(Request $request, LabelRecord $record): JsonResponse
+    {
+        $request->user()->batches()->whereKey($record->batch_id)->firstOrFail();
+
+        return response()->json($record);
     }
 
     public function updateTemplate(Request $request, WorkbookBatch $batch): JsonResponse
