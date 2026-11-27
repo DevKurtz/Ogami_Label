@@ -160,9 +160,11 @@ class LabelController extends Controller
                 $baseline = min(535, $y + min($h - 2, $size + 4));
                 $align = in_array($element['align'] ?? 'left', ['left', 'center', 'right'], true) ? ($element['align'] ?? 'left') : 'left';
                 if ($centerPartNumber) $align = 'center';
-                if ($isLegacyLayout && $type === 'text' && in_array($field, ['partNumberCode', 'quantityCode', 'supplierCode', 'serialCode'], true)) $align = 'center';
+                $isLegacyCodeCaption = $isLegacyLayout && $type === 'text' && in_array($field, ['partNumberCode', 'quantityCode', 'supplierCode', 'serialCode'], true);
+                if ($isLegacyCodeCaption) $align = 'center';
                 $textX = $align === 'center' ? $x + $w / 2 : ($align === 'right' ? $x + $w - 3 : $x + 3);
-                $svg[] = sprintf('<text x="%s" y="%s" text-anchor="%s" font-family="Arial,sans-serif" font-size="%.2f" clip-path="url(#element-clip-%d)">%s</text>', $textX, $baseline, $align === 'left' ? 'start' : ($align === 'right' ? 'end' : 'middle'), $size, $elementIndex, e($display));
+                $captionLength = $isLegacyCodeCaption && $display !== '' && $legacyBarcodeType($value) === $generator::TYPE_CODE_39 ? sprintf(' textLength="%.2f" lengthAdjust="spacing"', $w) : '';
+                $svg[] = sprintf('<text x="%s" y="%s" text-anchor="%s" font-family="Arial,sans-serif" font-size="%.2f"%s clip-path="url(#element-clip-%d)">%s</text>', $textX, $baseline, $align === 'left' ? 'start' : ($align === 'right' ? 'end' : 'middle'), $size, $captionLength, $elementIndex, e($display));
             }
             // Older Ogami templates may have saved without a QR widget. Keep the historical
             // top-right QR when the sheet still has its familiar standard fields and QR data.
@@ -177,7 +179,7 @@ class LabelController extends Controller
         if ($qrMarkup !== '') $svg[] = '<g clip-path="url(#clip-qr)">'.$qrMarkup.'</g>';
         $svg[] = $text(8,167,'QUANTITY',17,'start','quantity'); $svg[] = $text(8,193,'(Q)',17,'start','quantity'); $svg[] = $text(162,232,$data['quantity'] ?? '',55,'middle','quantity',230);
         $quantityCode = (string) ($data['quantityCode'] ?? '');
-        $svg[] = '<g clip-path="url(#clip-quantity)">'.$barcode($quantityCode,38,240,188,31,$legacyBarcodeType($quantityCode)).'</g>'; $svg[] = $text(132,277,$legacyBarcodeCaption($quantityCode),10,'middle','quantity',188);
+        $svg[] = '<g clip-path="url(#clip-quantity)">'.$barcode($quantityCode,38,240,188,31,$legacyBarcodeType($quantityCode)).'</g>'; $quantityCaption = $legacyBarcodeCaption($quantityCode); $svg[] = sprintf('<text x="132" y="277" text-anchor="middle" font-family="Arial,sans-serif" font-size="10"%s clip-path="url(#clip-quantity)">%s</text>', $quantityCaption !== '' && $legacyBarcodeType($quantityCode) === $generator::TYPE_CODE_39 ? ' textLength="188" lengthAdjust="spacing"' : '', e($quantityCaption));
         $svg[] = $text(260,167,'PARTS DESCRIPTION',17,'start','description'); $svg[] = $text(400,211,$data['partName'] ?? '',22,'middle','description',270);
         $svg[] = $text(552,167,'MODEL NAME',17,'start','model'); $svg[] = $text(652,211,$data['modelName'] ?? '',22,'middle','model',200);
         $svg[] = $text(260,245,'CARTON WEIGHT (Kg)',17,'start','weight'); $svg[] = $text(400,279,$data['cartonWeight'] ?? '',25,'middle','weight',270);
@@ -186,12 +188,12 @@ class LabelController extends Controller
         $svg[] = $text(647,278,$componentSerial,17,'middle','component',190);
         $svg[] = $text(8,314,'SUPPLIER NUMBER',17,'start','supplier'); $svg[] = $text(8,340,'(V)',17,'start','supplier'); $svg[] = $text(200,344,$data['supplierNumber'] ?? '',22,'middle','supplier',230);
         $supplierCode = (string) ($data['supplierCode'] ?? '');
-        $svg[] = '<g clip-path="url(#clip-supplier)">'.$barcode($supplierCode,35,354,190,36,$legacyBarcodeType($supplierCode)).'</g>'; $svg[] = $text(135,396,$legacyBarcodeCaption($supplierCode),10,'middle','supplier',190);
+        $svg[] = '<g clip-path="url(#clip-supplier)">'.$barcode($supplierCode,35,354,190,36,$legacyBarcodeType($supplierCode)).'</g>'; $supplierCaption = $legacyBarcodeCaption($supplierCode); $svg[] = sprintf('<text x="130" y="396" text-anchor="middle" font-family="Arial,sans-serif" font-size="10"%s clip-path="url(#clip-supplier)">%s</text>', $supplierCaption !== '' && $legacyBarcodeType($supplierCode) === $generator::TYPE_CODE_39 ? ' textLength="190" lengthAdjust="spacing"' : '', e($supplierCaption));
         $svg[] = $text(260,314,'MFG DAT',17,'start','date'); $svg[] = $text(400,343,$data['mfgDate'] ?? '',25,'middle','date',270);
         $svg[] = $text(552,314,'SUPPLIER PN',17,'start','supplier-pn'); $svg[] = $text(552,348,'(2P)',17,'start','supplier-pn');
         $svg[] = $text(8,430,'SERIAL NO',17,'start','serial'); $svg[] = $text(8,456,'(S)',17,'start','serial'); $svg[] = $text(219,460,$data['serialNo'] ?? '',22,'middle','serial',405);
         $serialCode = (string) ($data['serialCode'] ?? '');
-        $svg[] = '<g clip-path="url(#clip-serial)">'.$barcode($serialCode,38,474,361,39,$legacyBarcodeType($serialCode)).'</g>'; $svg[] = $text(218.5,518,$legacyBarcodeCaption($serialCode),10,'middle','serial',361);
+        $svg[] = '<g clip-path="url(#clip-serial)">'.$barcode($serialCode,38,474,361,39,$legacyBarcodeType($serialCode)).'</g>'; $svg[] = sprintf('<text x="218.5" y="518" text-anchor="middle" font-family="Arial,sans-serif" font-size="10" textLength="361" lengthAdjust="spacing" clip-path="url(#clip-serial)">%s</text>', e($legacyBarcodeCaption($serialCode)));
         $svg[] = $text(444,430,'MADE IN PHILIPPINE',17,'start','origin'); $svg[] = $text(600,482,'PHILIPPINES OGAMI',17,'middle','origin',300); $svg[] = $text(600,503,'CORPORATION',17,'middle','origin',300);
         $svg[] = '</svg>';
 
