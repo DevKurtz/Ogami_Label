@@ -32,7 +32,9 @@ class WorkbookImporter
     private const FIELDS = [
         'serialNumber' => ['SERIAL NUMBER'],
         'partNumber' => ['PART NUMBER①', 'PART NUMBER1', 'PART NUMBER 1', 'PART NO.', 'PART NO'],
-        'supplierPn' => ['PART NUMBER②', 'PART NUMBER2', 'PART NUMBER 2', 'SUPPLIER PART NUMBER', 'SUPPLIER PN'],
+        // Only a clearly named Supplier PN column belongs in this label cell.
+        // PART NUMBER② is a separate customer code and must never be copied here.
+        'supplierPn' => ['SUPPLIER PART NUMBER', 'SUPPLIER PN'],
         'partName' => ['PART NAME', 'PARTS DESCRIPTION', 'DESCRIPTION'],
         'quantity' => ['QUANTITY', 'QTY'],
         'modelName' => ['MODEL NAME', 'MODEL'],

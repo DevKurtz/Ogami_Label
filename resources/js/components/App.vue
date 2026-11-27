@@ -263,22 +263,22 @@ function makeLegacyTemplate() {
     const text = (field, label, x, y, w, h, fontSize = 18, align = 'left') => add('text', field, label, x, y, w, h, fontSize, align);
     const barcode = (field, x, y, w, h) => add('barcode', field, '', x, y, w, h);
 
-    [[0,0,535,150],[535,0,225,150],[0,150,265,140],[265,150,270,70],[535,150,225,70],[265,220,270,70],[535,220,225,70],[0,290,265,115],[265,290,270,115],[535,290,225,115],[0,405,470,130],[470,405,290,130]].forEach((cell) => box(...cell));
-    text('', 'PART NO.', 8, 11, 150, 22, 17); text('', '(P)', 8, 31, 60, 22, 17); text('partNumber', '', 0, 20, 535, 52, 62, 'center');
-    barcode('partNumberCode', 110, 83, 420, 50); text('partNumberCode', '', 110, 136, 420, 13, 10); add('qr', 'qrCode', '', 600, 8, 145, 135);
-    text('', 'QUANTITY', 8, 154, 180, 22, 17); text('', '(Q)', 8, 177, 60, 22, 17); text('quantity', '', 40, 180, 190, 49, 55);
+    [[0,0,760,143],[0,143,253,146],[253,143,293,77],[546,143,214,77],[253,220,293,69],[546,220,214,69],[0,289,253,116],[253,289,293,116],[253,350,293,55],[546,289,214,116],[0,405,437,130],[437,405,323,130]].forEach((cell) => box(...cell));
+    text('', 'PART NO.', 8, 5, 150, 22, 17); text('', '(P)', 8, 25, 60, 22, 17); text('partNumber', '', 0, 20, 650, 52, 62, 'center');
+    barcode('partNumberCode', 100, 78, 460, 45); text('partNumberCode', '', 100, 113, 460, 13, 10); add('qr', 'qrCode', '', 600, 12, 110, 110);
+    text('', 'QUANTITY', 8, 146, 180, 22, 17); text('', '(Q)', 8, 172, 60, 22, 17); text('quantity', '', 71, 185, 190, 49, 55);
     barcode('quantityCode', 38, 240, 188, 31); text('quantityCode', '', 38, 270, 188, 12, 10);
-    text('', 'PARTS DESCRIPTION', 275, 154, 245, 22, 17); text('partName', '', 280, 180, 250, 35, 22);
-    text('', 'MODEL NAME', 545, 154, 205, 22, 17); text('modelName', '', 550, 180, 195, 35, 22);
-    text('', 'CARTON WEIGHT (Kg)', 275, 224, 250, 22, 17); text('cartonWeight', '', 280, 250, 250, 35, 25);
-    text('', 'COMPONENT S/N', 545, 224, 205, 22, 17);
-    text('', 'SUPPLIER NUMBER (V)', 8, 294, 245, 22, 17); text('supplierNumber', '', 35, 319, 220, 34, 22);
-    barcode('supplierCode', 45, 354, 180, 36); text('supplierCode', '', 45, 390, 180, 12, 10);
-    text('', 'MFG DATE', 275, 294, 245, 22, 17); text('mfgDate', '', 285, 328, 250, 38, 25);
-    text('', 'SUPPLIER PN', 545, 294, 205, 22, 17); text('', '(2P)', 545, 318, 205, 22, 17); text('supplierPn', '', 550, 328, 195, 38, 22);
-    text('', 'SERIAL NO.', 8, 410, 180, 22, 17); text('', '(S)', 8, 438, 45, 22, 17); text('serialNo', '', 55, 435, 390, 32, 22);
-    barcode('serialCode', 25, 474, 405, 45); text('serialCode', '', 25, 515, 405, 12, 10);
-    text('', 'MADE IN PHILIPPINE', 480, 410, 270, 22, 17); text('', 'PHILIPPINES OGAMI', 485, 458, 260, 30, 17); text('', 'CORPORATION', 485, 485, 260, 30, 17);
+    text('', 'PARTS DESCRIPTION', 260, 146, 275, 22, 17); text('partName', '', 260, 180, 280, 35, 22, 'center');
+    text('', 'MODEL NAME', 552, 146, 205, 22, 17); text('modelName', '', 552, 180, 205, 35, 22, 'center');
+    text('', 'CARTON WEIGHT (Kg)', 260, 224, 275, 22, 17); text('cartonWeight', '', 260, 250, 280, 35, 25, 'center');
+    text('', 'COMPONENT S/N', 552, 224, 205, 22, 17);
+    text('', 'SUPPLIER NUMBER', 8, 293, 245, 22, 17); text('', '(V)', 8, 319, 60, 22, 17); text('supplierNumber', '', 85, 319, 230, 34, 22, 'center');
+    barcode('supplierCode', 35, 354, 190, 36); text('supplierCode', '', 35, 380, 190, 12, 10);
+    text('', 'MFG DAT', 260, 293, 275, 22, 17); text('mfgDate', '', 260, 315, 280, 38, 25, 'center');
+    text('', 'SUPPLIER PN', 552, 293, 205, 22, 17); text('', '(2P)', 552, 327, 205, 22, 17);
+    text('', 'SERIAL NO', 8, 410, 180, 22, 17); text('', '(S)', 8, 435, 45, 22, 17); text('serialNo', '', 15, 435, 405, 32, 22, 'center');
+    barcode('serialCode', 32, 474, 405, 45); text('serialCode', '', 32, 508, 405, 12, 10);
+    text('', 'MADE IN PHILIPPINE', 444, 410, 310, 22, 17); text('', 'PHILIPPINES OGAMI', 450, 460, 300, 30, 17); text('', 'CORPORATION', 450, 482, 300, 30, 17);
     return elements;
 }
 function beginInlineTextEdit(event, element) {
@@ -304,9 +304,9 @@ function openEditor() {
     const isLegacyLayout = templateElements.value.some((element) => String(element.id ?? '').startsWith('legacy-'));
     if (isLegacyLayout) {
         templateElements.value.forEach((element) => {
-            if (element.type === 'text' && element.field === 'partNumber' && Number(element.y) < 150) {
+            if (element.type === 'text' && element.field === 'partNumber' && Number(element.y) < 143) {
                 element.x = 0;
-                element.w = 535;
+                element.w = 650;
                 element.align = 'center';
             }
         });
@@ -487,7 +487,7 @@ async function downloadLabel(record) {
 
         const canvas = document.createElement('canvas');
         canvas.width = 1800;
-        canvas.height = Math.round(canvas.width * 535 / 760);
+        canvas.height = Math.round(canvas.width * 124.5 / 174.5);
         const context = canvas.getContext('2d');
         if (!context) throw new Error('PNG conversion is not available in this browser.');
         context.fillStyle = '#ffffff';
@@ -532,7 +532,7 @@ async function rasterizeLabelForPdf(record, width = 2300) {
         ]);
     } finally { window.clearTimeout(imageTimeout); }
 
-    const height = Math.round(width * 535 / 760);
+    const height = Math.round(width * 124.5 / 174.5);
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
@@ -554,11 +554,11 @@ async function rasterizeLabelForPdf(record, width = 2300) {
 function buildTwoUpPdf(images) {
     const pageWidth = 595.28; // A4 portrait, points
     const pageHeight = 841.89;
-    const labelWidth = 493.23; // 174 mm, matching the guide's printable width
-    const labelHeight = labelWidth * 535 / 760;
-    const gap = 46.77; // 16.5 mm between labels
-    const top = (pageHeight - (labelHeight * 2 + gap)) / 2;
-    const x = (pageWidth - labelWidth) / 2;
+    const labelWidth = 494.72; // exact outer label width measured from the client PDF
+    const labelHeight = 352.8; // exact outer label height measured from the client PDF
+    const gap = 47.5; // space between the two guide labels
+    const top = 17.5; // guide places the first label near the page top
+    const x = 45.9; // guide's left edge on A4
     const pageCount = Math.ceil(images.length / 2);
     const objects = new Array(3 + pageCount * 4);
     const ascii = (value) => new TextEncoder().encode(value);

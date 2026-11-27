@@ -17,14 +17,14 @@
 
 @media print {
     @page {
-        size: 152mm 107mm;
+        size: 174.5mm 124.5mm;
         margin: 0;
     }
 
     html,
     body {
-        width: 152mm;
-        height: 107mm;
+        width: 174.5mm;
+        height: 124.5mm;
         margin: 0 !important;
         padding: 0 !important;
         background: #fff !important;
@@ -45,16 +45,16 @@
         display: block !important;
         position: fixed;
         inset: 0 auto auto 0;
-        width: 152mm;
-        height: 107mm;
+        width: 174.5mm;
+        height: 124.5mm;
         overflow: hidden;
         background: #fff;
     }
 
     .print-label img {
         display: block;
-        width: 152mm;
-        height: 107mm;
+        width: 174.5mm;
+        height: 124.5mm;
         max-width: none;
     }
 }
