@@ -231,13 +231,13 @@ function selectRecord(record) { selectedRecord.value = record; }
 function makeLegacyTemplate() {
     let index = 0;
     const elements = [];
-    const add = (type, field, label, x, y, w, h, fontSize = 18) => elements.push({ id: `legacy-${++index}`, type, field, label, x, y, w, h, fontSize });
+    const add = (type, field, label, x, y, w, h, fontSize = 18, align = 'left') => elements.push({ id: `legacy-${++index}`, type, field, label, x, y, w, h, fontSize, align });
     const box = (x, y, w, h) => add('box', '', '', x, y, w, h);
-    const text = (field, label, x, y, w, h, fontSize = 18) => add('text', field, label, x, y, w, h, fontSize);
+    const text = (field, label, x, y, w, h, fontSize = 18, align = 'left') => add('text', field, label, x, y, w, h, fontSize, align);
     const barcode = (field, x, y, w, h) => add('barcode', field, '', x, y, w, h);
 
     [[0,0,535,150],[535,0,225,150],[0,150,265,140],[265,150,270,70],[535,150,225,70],[265,220,270,70],[535,220,225,70],[0,290,265,115],[265,290,270,115],[535,290,225,115],[0,405,470,130],[470,405,290,130]].forEach((cell) => box(...cell));
-    text('', 'PART NO.', 8, 11, 150, 22, 16); text('', '(P)', 8, 31, 60, 22, 15); text('partNumber', '', 185, 20, 335, 52, 40);
+    text('', 'PART NO.', 8, 11, 150, 22, 16); text('', '(P)', 8, 31, 60, 22, 15); text('partNumber', '', 100, 20, 335, 52, 40, 'center');
     barcode('partNumberCode', 110, 83, 420, 50); text('partNumberCode', '', 110, 136, 420, 13, 10); add('qr', 'qrCode', '', 600, 8, 145, 135);
     text('', 'QUANTITY', 8, 154, 180, 22, 16); text('', '(Q)', 8, 177, 60, 22, 15); text('quantity', '', 40, 180, 190, 49, 34);
     barcode('quantityCode', 38, 240, 188, 31); text('quantityCode', '', 38, 270, 188, 12, 9);
@@ -274,6 +274,12 @@ function openEditor() {
     draftDesignMode.value = false;
     const savedElements = selectedBatch.value?.label_template?.elements;
     templateElements.value = structuredClone(Array.isArray(savedElements) && savedElements.length ? savedElements : makeLegacyTemplate());
+    const isLegacyLayout = templateElements.value.some((element) => String(element.id ?? '').startsWith('legacy-'));
+    if (isLegacyLayout) {
+        templateElements.value.forEach((element) => {
+            if (element.type === 'text' && element.field === 'partNumber' && Number(element.y) < 150) element.align = 'center';
+        });
+    }
     editingTextId.value = null;
     templateMessage.value = ''; templateError.value = ''; editorOpen.value = true;
 }
@@ -783,8 +789,8 @@ onBeforeUnmount(endCanvasInteraction);
               <span v-if="element.type==='box'" class="pointer-events-none block h-full w-full border border-slate-800"></span>
               <span v-else-if="element.type==='qr'" class="flex h-full w-full items-center justify-center bg-white p-1"><img v-if="qrPreviews[element.id]" :src="qrPreviews[element.id]" class="pointer-events-none block h-full w-full object-contain" alt="Scannable QR code preview"><span v-else class="px-2 text-center text-xs text-slate-500">{{ elementValue(element) ? 'QR preview unavailable for this value' : 'No value in the preview row' }}</span></span>
               <span v-else-if="element.type==='barcode'" class="pointer-events-none grid h-full place-items-center bg-white text-3xl tracking-widest">▥ ▥ ▥</span>
-              <span v-else-if="element.field" class="pointer-events-none block truncate">{{ elementValue(element) || `[${element.field}]` }}</span>
-              <span v-else :data-text-widget="element.id" :contenteditable="editingTextId===element.id" @pointerdown="editingTextId===element.id && $event.stopPropagation()" @dblclick.stop="beginInlineTextEdit($event,element)" @input="updateInlineText($event,element)" @blur="finishInlineTextEdit" @keydown.enter.prevent="finishInlineTextEdit" class="block min-h-5 cursor-text whitespace-pre-wrap break-words outline-none">{{ element.label || 'Double-click to edit' }}</span>
+              <span v-else-if="element.field" class="pointer-events-none block truncate" :style="{textAlign:element.align||'left'}">{{ elementValue(element) || `[${element.field}]` }}</span>
+              <span v-else :data-text-widget="element.id" :contenteditable="editingTextId===element.id" @pointerdown="editingTextId===element.id && $event.stopPropagation()" @dblclick.stop="beginInlineTextEdit($event,element)" @input="updateInlineText($event,element)" @blur="finishInlineTextEdit" @keydown.enter.prevent="finishInlineTextEdit" class="block min-h-5 cursor-text whitespace-pre-wrap break-words outline-none" :style="{textAlign:element.align||'left'}">{{ element.label || 'Double-click to edit' }}</span>
               <button type="button" title="Drag to resize" aria-label="Resize design element" class="absolute bottom-0 right-0 h-4 w-4 touch-none cursor-nwse-resize border-l border-t border-blue-600 bg-white" @pointerdown.stop="beginCanvasInteraction($event,element,'resize')" @click.stop></button>
             </div>
           </div>
@@ -798,6 +804,7 @@ onBeforeUnmount(endCanvasInteraction);
               <small v-if="element.type==='qr'" class="mb-2 block text-xs text-slate-500">QR image encodes the value from the selected Excel column.</small>
               <small v-else-if="element.type==='text'&&element.field" class="mb-2 block text-xs text-slate-500">Prints the value as readable text.</small>
               <select v-if="(element.type==='qr'||element.type==='barcode'||(element.type==='text'&&element.field))" v-model="element.field" class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"><option v-for="[field,label] in availableFields" :key="field" :value="field">{{ label }}</option></select>
+              <label v-if="element.type==='text'" class="mb-2 block text-xs text-slate-500">Text alignment<select v-model="element.align" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-xs"><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
               <div class="grid grid-cols-2 gap-2"><label v-for="key in ['x','y','w','h']" :key="key" class="text-xs capitalize text-slate-500">{{ key }}<input v-model.number="element[key]" type="number" min="0" :max="key==='w'?760-element.x:key==='h'?535-element.y:key==='x'?760-element.w:535-element.h" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label></div>
               <label v-if="element.type==='text'" class="mt-2 block text-xs text-slate-500">Font size<input v-model.number="element.fontSize" type="number" min="8" max="64" class="mt-1 w-full rounded border border-slate-300 px-2 py-1 text-sm"></label>
             </div>

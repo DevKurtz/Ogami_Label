@@ -51,6 +51,7 @@ class BatchController extends Controller
             'template.elements.*.type' => ['required', Rule::in(['text', 'barcode', 'qr', 'box'])],
             'template.elements.*.field' => ['nullable', 'string', 'max:160'],
             'template.elements.*.label' => ['nullable', 'string', 'max:160'],
+            'template.elements.*.align' => ['nullable', Rule::in(['left', 'center', 'right'])],
             'template.elements.*.x' => ['required', 'numeric', 'min:0', 'max:760'],
             'template.elements.*.y' => ['required', 'numeric', 'min:0', 'max:535'],
             'template.elements.*.w' => ['required', 'numeric', 'min:20', 'max:760'],
@@ -116,6 +117,7 @@ class BatchController extends Controller
                     'startColumn' => ['required', 'integer', 'min:1'],
                     'endColumn' => ['required', 'integer', 'min:1'],
                     'endRow' => ['required', 'integer', 'min:2'],
+                    'rowCount' => ['nullable', 'integer', 'min:1', 'max:50000'],
                     'codeTypes' => ['present', 'array'],
                     'codeTypes.*' => [Rule::in(['qr', 'barcode', 'text', 'ignore'])],
                     'labelTemplate' => ['nullable', 'array'],
@@ -124,6 +126,7 @@ class BatchController extends Controller
                     'labelTemplate.elements.*.type' => ['required_with:labelTemplate', Rule::in(['text', 'barcode', 'qr', 'box'])],
                     'labelTemplate.elements.*.field' => ['nullable', 'string', 'max:160'],
                     'labelTemplate.elements.*.label' => ['nullable', 'string', 'max:160'],
+                    'labelTemplate.elements.*.align' => ['nullable', Rule::in(['left', 'center', 'right'])],
                     'labelTemplate.elements.*.x' => ['required_with:labelTemplate', 'numeric', 'min:0', 'max:760'],
                     'labelTemplate.elements.*.y' => ['required_with:labelTemplate', 'numeric', 'min:0', 'max:535'],
                     'labelTemplate.elements.*.w' => ['required_with:labelTemplate', 'numeric', 'min:20', 'max:760'],
@@ -132,6 +135,9 @@ class BatchController extends Controller
                 ])->validate();
                 if (isset($imports[$table['id']])) throw new RuntimeException('A table was selected more than once.');
                 $imported = $importer->import($validated['file']->getRealPath(), $table);
+                if (isset($table['rowCount']) && (int) $table['rowCount'] !== count($imported['rows'])) {
+                    throw new RuntimeException("The selected table changed after analysis. Preview showed {$table['rowCount']} data rows, but the uploaded file contains ".count($imported['rows']).". Please select the file and analyze it again. No records were saved.");
+                }
                 $legacyFormat = $importer->isLegacyFormat($imported['headers']);
                 if (!$legacyFormat && empty($table['labelTemplate']['elements'])) {
                     throw new RuntimeException("Create a label design for “{$table['sheetName']} · {$table['tableName']}” before generating records.");

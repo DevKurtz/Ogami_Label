@@ -84,6 +84,7 @@ class LabelController extends Controller
         };
         if (!empty($batch->label_template['elements']) && is_array($batch->label_template['elements'])) {
             $elements = $batch->label_template['elements'];
+            $isLegacyLayout = collect($elements)->contains(fn ($element) => str_starts_with((string) ($element['id'] ?? ''), 'legacy-'));
             $hasQrElement = collect($elements)->contains(fn ($element) => ($element['type'] ?? '') === 'qr');
             $looksLikeOgamiLayout = collect($elements)->filter(fn ($element) => in_array($element['field'] ?? '', ['partNumber', 'quantity', 'partName', 'modelName', 'serialNo'], true))->count() >= 3;
             $svg = ['<svg xmlns="http://www.w3.org/2000/svg" width="152mm" height="107mm" viewBox="0 0 760 535"><defs>'];
@@ -113,7 +114,10 @@ class LabelController extends Controller
                 $size = max(8, min(64, (int) ($element['fontSize'] ?? 20)));
                 $display = $type === 'text' && $field !== '' ? $value : trim((string) ($element['label'] ?? '')) . ($value !== '' ? ($field !== '' && ($element['label'] ?? '') !== '' ? ': ' : '') . $value : '');
                 $baseline = min(535, $y + min($h - 2, $size + 4));
-                $svg[] = sprintf('<text x="%s" y="%s" font-family="Arial,sans-serif" font-size="%d" clip-path="url(#element-clip-%d)">%s</text>', $x + 3, $baseline, $size, $elementIndex, e($display));
+                $align = in_array($element['align'] ?? 'left', ['left', 'center', 'right'], true) ? ($element['align'] ?? 'left') : 'left';
+                if ($isLegacyLayout && $type === 'text' && $field === 'partNumber' && $y < 150) $align = 'center';
+                $textX = $align === 'center' ? $x + $w / 2 : ($align === 'right' ? $x + $w - 3 : $x + 3);
+                $svg[] = sprintf('<text x="%s" y="%s" text-anchor="%s" font-family="Arial,sans-serif" font-size="%d" clip-path="url(#element-clip-%d)">%s</text>', $textX, $baseline, $align === 'left' ? 'start' : ($align === 'right' ? 'end' : 'middle'), $size, $elementIndex, e($display));
             }
             // Older Ogami templates may have saved without a QR widget. Keep the historical
             // top-right QR when the sheet still has its familiar standard fields and QR data.
@@ -122,7 +126,7 @@ class LabelController extends Controller
 
             return response(implode('', $svg), 200, ['Content-Type' => 'image/svg+xml; charset=utf-8', 'Cache-Control' => 'private, max-age=86400, immutable']);
         }
-        $svg[] = $text(8,27,'PART NO.',16,'start','part'); $svg[] = $text(8,47,'(P)',15,'start','part'); $svg[] = $text(360,69,$data['partNumber'] ?? '',40,'middle','part',510);
+        $svg[] = $text(8,27,'PART NO.',16,'start','part'); $svg[] = $text(8,47,'(P)',15,'start','part'); $svg[] = $text(267,69,$data['partNumber'] ?? '',40,'middle','part',510);
         $svg[] = '<g clip-path="url(#clip-part)">'.$barcode($data['partNumberCode'] ?? '',110,83,420,50).'</g>'; $svg[] = $text(320,146,$data['partNumberCode'] ?? '',10,'middle','part',420);
         if ($qrMarkup !== '') $svg[] = '<g clip-path="url(#clip-qr)">'.$qrMarkup.'</g>';
         $svg[] = $text(8,171,'QUANTITY',16,'start','quantity'); $svg[] = $text(8,194,'(Q)',15,'start','quantity'); $svg[] = $text(130,231,$data['quantity'] ?? '',34,'middle','quantity',230);

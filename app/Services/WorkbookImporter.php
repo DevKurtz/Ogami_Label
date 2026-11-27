@@ -147,14 +147,19 @@ class WorkbookImporter
             }
         }
 
-        $hasMultiRowTable = collect($tables)->contains(fn ($table) => $table['rowCount'] > 1);
-        if ($hasMultiRowTable) {
-            // MASTER/SUMMARY/TEMPLATE tabs often contain only a single lookup or example row.
-            // Don't present those auxiliary tabs as extra label tables beside the real records.
-            $tables = array_values(array_filter($tables, fn ($table) => !(
-                $table['rowCount'] === 1
-                && preg_match('/^(MASTER|SUMMARY|TEMPLATE)$/i', trim($table['sheetName']))
-            )));
+        $hasPrimaryLabelTable = collect($tables)->contains(fn ($table) =>
+            $table['rowCount'] > 1 && !preg_match('/^(MASTER|SUMMARY|TEMPLATE|LOOKUP|REFERENCE)$/i', trim($table['sheetName']))
+        );
+        if ($hasPrimaryLabelTable) {
+            // Keep auxiliary sheets available for deliberate selection, but don't import
+            // reference/master tabs automatically when a real multi-row label table exists.
+            foreach ($tables as &$table) {
+                if (preg_match('/^(MASTER|SUMMARY|TEMPLATE|LOOKUP|REFERENCE)$/i', trim($table['sheetName']))) {
+                    $table['defaultSelected'] = false;
+                    $table['selectionNote'] = 'Reference or template sheet; not selected automatically because another label table was found.';
+                }
+            }
+            unset($table);
         }
 
         if ($tables && !collect($tables)->contains(fn ($table) => $table['defaultSelected'])) {
