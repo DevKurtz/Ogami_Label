@@ -80,8 +80,9 @@ class LabelController extends Controller
                 if ($estimatedWidth > $maxWidth) $size = max(8, (int) floor($size * $maxWidth / $estimatedWidth));
             }
 
-            return sprintf('<text x="%d" y="%d" font-family="Arial,sans-serif" font-size="%d" text-anchor="%s" clip-path="url(#clip-%s)">%s</text>', $x,$y,$size,$anchor,$cell,e($value));
+            return sprintf('<text x="%s" y="%s" font-family="Arial,sans-serif" font-size="%.2f" text-anchor="%s" clip-path="url(#clip-%s)">%s</text>', $x,$y,$size,$anchor,$cell,e($value));
         };
+        $svgUnitsPerPdfPoint = 760 / 493.23;
         if (!empty($batch->label_template['elements']) && is_array($batch->label_template['elements'])) {
             $elements = $batch->label_template['elements'];
             $isLegacyLayout = collect($elements)->contains(fn ($element) => str_starts_with((string) ($element['id'] ?? ''), 'legacy-'));
@@ -112,12 +113,25 @@ class LabelController extends Controller
                     continue;
                 }
                 $size = max(8, min(64, (int) ($element['fontSize'] ?? 20)));
+                if ($isLegacyLayout && $type === 'text') {
+                    if ($field === 'supplierPn') continue;
+                    $fontPoints = match ($field) {
+                        'partNumber' => 40,
+                        'quantity' => 36,
+                        'cartonWeight', 'mfgDate' => 16,
+                        'partName', 'modelName', 'supplierNumber', 'serialNo' => 14,
+                        'partNumberCode' => 6.7,
+                        'quantityCode', 'supplierCode', 'serialCode' => 6.5,
+                        default => 11,
+                    };
+                    $size = $fontPoints * $svgUnitsPerPdfPoint;
+                }
                 $display = $type === 'text' && $field !== '' ? $value : trim((string) ($element['label'] ?? '')) . ($value !== '' ? ($field !== '' && ($element['label'] ?? '') !== '' ? ': ' : '') . $value : '');
                 $baseline = min(535, $y + min($h - 2, $size + 4));
                 $align = in_array($element['align'] ?? 'left', ['left', 'center', 'right'], true) ? ($element['align'] ?? 'left') : 'left';
                 if ($isLegacyLayout && $type === 'text' && $field === 'partNumber' && $y < 150) $align = 'center';
                 $textX = $align === 'center' ? $x + $w / 2 : ($align === 'right' ? $x + $w - 3 : $x + 3);
-                $svg[] = sprintf('<text x="%s" y="%s" text-anchor="%s" font-family="Arial,sans-serif" font-size="%d" clip-path="url(#element-clip-%d)">%s</text>', $textX, $baseline, $align === 'left' ? 'start' : ($align === 'right' ? 'end' : 'middle'), $size, $elementIndex, e($display));
+                $svg[] = sprintf('<text x="%s" y="%s" text-anchor="%s" font-family="Arial,sans-serif" font-size="%.2f" clip-path="url(#element-clip-%d)">%s</text>', $textX, $baseline, $align === 'left' ? 'start' : ($align === 'right' ? 'end' : 'middle'), $size, $elementIndex, e($display));
             }
             // Older Ogami templates may have saved without a QR widget. Keep the historical
             // top-right QR when the sheet still has its familiar standard fields and QR data.
@@ -126,24 +140,24 @@ class LabelController extends Controller
 
             return response(implode('', $svg), 200, ['Content-Type' => 'image/svg+xml; charset=utf-8', 'Cache-Control' => 'private, max-age=86400, immutable']);
         }
-        $svg[] = $text(8,27,'PART NO.',16,'start','part'); $svg[] = $text(8,47,'(P)',15,'start','part'); $svg[] = $text(267,69,$data['partNumber'] ?? '',40,'middle','part',510);
+        $svg[] = $text(8,27,'PART NO.',17,'start','part'); $svg[] = $text(8,47,'(P)',17,'start','part'); $svg[] = $text(267,69,$data['partNumber'] ?? '',62,'middle','part',510);
         $svg[] = '<g clip-path="url(#clip-part)">'.$barcode($data['partNumberCode'] ?? '',110,83,420,50).'</g>'; $svg[] = $text(320,146,$data['partNumberCode'] ?? '',10,'middle','part',420);
         if ($qrMarkup !== '') $svg[] = '<g clip-path="url(#clip-qr)">'.$qrMarkup.'</g>';
-        $svg[] = $text(8,171,'QUANTITY',16,'start','quantity'); $svg[] = $text(8,194,'(Q)',15,'start','quantity'); $svg[] = $text(130,231,$data['quantity'] ?? '',34,'middle','quantity',230);
-        $svg[] = '<g clip-path="url(#clip-quantity)">'.$barcode($data['quantityCode'] ?? '',38,240,188,31).'</g>'; $svg[] = $text(132,277,$data['quantityCode'] ?? '',9,'middle','quantity',188);
-        $svg[] = $text(275,171,'PARTS DESCRIPTION',15,'start','description'); $svg[] = $text(400,210,$data['partName'] ?? '',17,'middle','description',250);
-        $svg[] = $text(545,171,'MODEL NAME',15,'start','model'); $svg[] = $text(647,208,$data['modelName'] ?? '',18,'middle','model',190);
-        $svg[] = $text(275,241,'CARTON WEIGHT (Kg)',15,'start','weight'); $svg[] = $text(400,278,$data['cartonWeight'] ?? '',19,'middle','weight',240);
-        $svg[] = $text(545,241,'COMPONENT S/N',15,'start','component');
+        $svg[] = $text(8,171,'QUANTITY',17,'start','quantity'); $svg[] = $text(8,194,'(Q)',17,'start','quantity'); $svg[] = $text(130,231,$data['quantity'] ?? '',55,'middle','quantity',230);
+        $svg[] = '<g clip-path="url(#clip-quantity)">'.$barcode($data['quantityCode'] ?? '',38,240,188,31).'</g>'; $svg[] = $text(132,277,$data['quantityCode'] ?? '',10,'middle','quantity',188);
+        $svg[] = $text(275,171,'PARTS DESCRIPTION',17,'start','description'); $svg[] = $text(400,210,$data['partName'] ?? '',22,'middle','description',250);
+        $svg[] = $text(545,171,'MODEL NAME',17,'start','model'); $svg[] = $text(647,208,$data['modelName'] ?? '',22,'middle','model',190);
+        $svg[] = $text(275,241,'CARTON WEIGHT (Kg)',17,'start','weight'); $svg[] = $text(400,278,$data['cartonWeight'] ?? '',25,'middle','weight',240);
+        $svg[] = $text(545,241,'COMPONENT S/N',17,'start','component');
         $componentSerial = $data['componentSn'] ?? collect($data['customFields'] ?? [])->firstWhere('name', 'COMPONENT S/N')['value'] ?? '';
         $svg[] = $text(647,278,$componentSerial,17,'middle','component',190);
-        $svg[] = $text(8,312,'SUPPLIER NUMBER (V)',15,'start','supplier'); $svg[] = $text(132,348,$data['supplierNumber'] ?? '',19,'middle','supplier',230);
-        $svg[] = '<g clip-path="url(#clip-supplier)">'.$barcode($data['supplierCode'] ?? '',45,354,180,36).'</g>'; $svg[] = $text(135,396,$data['supplierCode'] ?? '',9,'middle','supplier',180);
-        $svg[] = $text(275,312,'MFG DATE',15,'start','date'); $svg[] = $text(400,363,$data['mfgDate'] ?? '',21,'middle','date',240);
-        $svg[] = $text(545,312,'SUPPLIER PN (2P)',15,'start','supplier-pn'); $svg[] = $text(647,363,$data['supplierPn'] ?? '',19,'middle','supplier-pn',190);
-        $svg[] = $text(8,429,'SERIAL NO.',15,'start','serial'); $svg[] = $text(8,457,'(S)',15,'start','serial'); $svg[] = $text(235,459,$data['serialNo'] ?? '',21,'middle','serial',430);
-        $svg[] = '<g clip-path="url(#clip-serial)">'.$barcode($data['serialCode'] ?? '',25,474,405,45).'</g>'; $svg[] = $text(225,528,$data['serialCode'] ?? '',9,'middle','serial',405);
-        $svg[] = $text(480,429,'MADE IN PHILIPPINE',15,'start','origin'); $svg[] = $text(615,481,'PHILIPPINES OGAMI',16,'middle','origin',260); $svg[] = $text(615,506,'CORPORATION',16,'middle','origin',260);
+        $svg[] = $text(8,312,'SUPPLIER NUMBER (V)',17,'start','supplier'); $svg[] = $text(132,348,$data['supplierNumber'] ?? '',22,'middle','supplier',230);
+        $svg[] = '<g clip-path="url(#clip-supplier)">'.$barcode($data['supplierCode'] ?? '',45,354,180,36).'</g>'; $svg[] = $text(135,396,$data['supplierCode'] ?? '',10,'middle','supplier',180);
+        $svg[] = $text(275,312,'MFG DATE',17,'start','date'); $svg[] = $text(400,363,$data['mfgDate'] ?? '',25,'middle','date',240);
+        $svg[] = $text(545,312,'SUPPLIER PN',17,'start','supplier-pn'); $svg[] = $text(545,336,'(2P)',17,'start','supplier-pn');
+        $svg[] = $text(8,429,'SERIAL NO.',17,'start','serial'); $svg[] = $text(8,457,'(S)',17,'start','serial'); $svg[] = $text(235,459,$data['serialNo'] ?? '',22,'middle','serial',430);
+        $svg[] = '<g clip-path="url(#clip-serial)">'.$barcode($data['serialCode'] ?? '',25,474,405,45).'</g>'; $svg[] = $text(225,528,$data['serialCode'] ?? '',10,'middle','serial',405);
+        $svg[] = $text(480,429,'MADE IN PHILIPPINE',17,'start','origin'); $svg[] = $text(615,481,'PHILIPPINES OGAMI',17,'middle','origin',260); $svg[] = $text(615,506,'CORPORATION',17,'middle','origin',260);
         $svg[] = '</svg>';
 
         return response(implode('', $svg), 200, [

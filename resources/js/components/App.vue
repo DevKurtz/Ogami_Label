@@ -237,21 +237,21 @@ function makeLegacyTemplate() {
     const barcode = (field, x, y, w, h) => add('barcode', field, '', x, y, w, h);
 
     [[0,0,535,150],[535,0,225,150],[0,150,265,140],[265,150,270,70],[535,150,225,70],[265,220,270,70],[535,220,225,70],[0,290,265,115],[265,290,270,115],[535,290,225,115],[0,405,470,130],[470,405,290,130]].forEach((cell) => box(...cell));
-    text('', 'PART NO.', 8, 11, 150, 22, 16); text('', '(P)', 8, 31, 60, 22, 15); text('partNumber', '', 100, 20, 335, 52, 40, 'center');
+    text('', 'PART NO.', 8, 11, 150, 22, 17); text('', '(P)', 8, 31, 60, 22, 17); text('partNumber', '', 100, 20, 335, 52, 62, 'center');
     barcode('partNumberCode', 110, 83, 420, 50); text('partNumberCode', '', 110, 136, 420, 13, 10); add('qr', 'qrCode', '', 600, 8, 145, 135);
-    text('', 'QUANTITY', 8, 154, 180, 22, 16); text('', '(Q)', 8, 177, 60, 22, 15); text('quantity', '', 40, 180, 190, 49, 34);
-    barcode('quantityCode', 38, 240, 188, 31); text('quantityCode', '', 38, 270, 188, 12, 9);
-    text('', 'PARTS DESCRIPTION', 275, 154, 245, 22, 15); text('partName', '', 280, 180, 250, 35, 17);
-    text('', 'MODEL NAME', 545, 154, 205, 22, 15); text('modelName', '', 550, 180, 195, 35, 18);
-    text('', 'CARTON WEIGHT (Kg)', 275, 224, 250, 22, 15); text('cartonWeight', '', 280, 250, 250, 35, 19);
-    text('', 'COMPONENT S/N', 545, 224, 205, 22, 15);
-    text('', 'SUPPLIER NUMBER (V)', 8, 294, 245, 22, 15); text('supplierNumber', '', 35, 319, 220, 34, 19);
-    barcode('supplierCode', 45, 354, 180, 36); text('supplierCode', '', 45, 390, 180, 12, 9);
-    text('', 'MFG DATE', 275, 294, 245, 22, 15); text('mfgDate', '', 285, 328, 250, 38, 21);
-    text('', 'SUPPLIER PN (2P)', 545, 294, 205, 22, 15); text('supplierPn', '', 550, 328, 195, 38, 19);
-    text('', 'SERIAL NO.', 8, 410, 180, 22, 15); text('', '(S)', 8, 438, 45, 22, 15); text('serialNo', '', 55, 435, 390, 32, 21);
-    barcode('serialCode', 25, 474, 405, 45); text('serialCode', '', 25, 515, 405, 12, 9);
-    text('', 'MADE IN PHILIPPINE', 480, 410, 270, 22, 15); text('', 'PHILIPPINES OGAMI', 485, 458, 260, 30, 16); text('', 'CORPORATION', 485, 485, 260, 30, 16);
+    text('', 'QUANTITY', 8, 154, 180, 22, 17); text('', '(Q)', 8, 177, 60, 22, 17); text('quantity', '', 40, 180, 190, 49, 55);
+    barcode('quantityCode', 38, 240, 188, 31); text('quantityCode', '', 38, 270, 188, 12, 10);
+    text('', 'PARTS DESCRIPTION', 275, 154, 245, 22, 17); text('partName', '', 280, 180, 250, 35, 22);
+    text('', 'MODEL NAME', 545, 154, 205, 22, 17); text('modelName', '', 550, 180, 195, 35, 22);
+    text('', 'CARTON WEIGHT (Kg)', 275, 224, 250, 22, 17); text('cartonWeight', '', 280, 250, 250, 35, 25);
+    text('', 'COMPONENT S/N', 545, 224, 205, 22, 17);
+    text('', 'SUPPLIER NUMBER (V)', 8, 294, 245, 22, 17); text('supplierNumber', '', 35, 319, 220, 34, 22);
+    barcode('supplierCode', 45, 354, 180, 36); text('supplierCode', '', 45, 390, 180, 12, 10);
+    text('', 'MFG DATE', 275, 294, 245, 22, 17); text('mfgDate', '', 285, 328, 250, 38, 25);
+    text('', 'SUPPLIER PN', 545, 294, 205, 22, 17); text('', '(2P)', 545, 318, 205, 22, 17);
+    text('', 'SERIAL NO.', 8, 410, 180, 22, 17); text('', '(S)', 8, 438, 45, 22, 17); text('serialNo', '', 55, 435, 390, 32, 22);
+    barcode('serialCode', 25, 474, 405, 45); text('serialCode', '', 25, 515, 405, 12, 10);
+    text('', 'MADE IN PHILIPPINE', 480, 410, 270, 22, 17); text('', 'PHILIPPINES OGAMI', 485, 458, 260, 30, 17); text('', 'CORPORATION', 485, 485, 260, 30, 17);
     return elements;
 }
 function beginInlineTextEdit(event, element) {
@@ -276,6 +276,7 @@ function openEditor() {
     templateElements.value = structuredClone(Array.isArray(savedElements) && savedElements.length ? savedElements : makeLegacyTemplate());
     const isLegacyLayout = templateElements.value.some((element) => String(element.id ?? '').startsWith('legacy-'));
     if (isLegacyLayout) {
+        templateElements.value = templateElements.value.filter((element) => !(element.type === 'text' && element.field === 'supplierPn'));
         templateElements.value.forEach((element) => {
             if (element.type === 'text' && element.field === 'partNumber' && Number(element.y) < 150) element.align = 'center';
         });
