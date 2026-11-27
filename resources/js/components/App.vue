@@ -278,7 +278,7 @@ function makeLegacyTemplate() {
     text('', 'SUPPLIER PN', 552, 293, 205, 22, 17); text('', '(2P)', 552, 327, 205, 22, 17);
     text('', 'SERIAL NO', 8, 410, 180, 22, 17); text('', '(S)', 8, 435, 45, 22, 17); text('serialNo', '', 15, 435, 405, 32, 22, 'center');
     barcode('serialCode', 38, 474, 361, 39); text('serialCode', '', 38, 518, 361, 12, 10, 'center');
-    text('', 'MADE IN PHILIPPINE', 444, 410, 310, 22, 17); text('', 'PHILIPPINES OGAMI', 450, 460, 300, 30, 17); text('', 'CORPORATION', 450, 482, 300, 30, 17);
+    text('', 'MADE IN PHILIPPINES', 444, 410, 310, 22, 17); text('', 'PHILIPPINES OGAMI', 450, 460, 300, 30, 17); text('', 'CORPORATION', 450, 482, 300, 30, 17);
     return elements;
 }
 function beginInlineTextEdit(event, element) {
@@ -471,7 +471,7 @@ function moveRecord(step) {
     const next = records.value[recordIndex.value + step]; if (next) selectRecord(next);
 }
 // Bump this when the server-side SVG renderer changes so immutable cached label images are refreshed.
-const labelRenderRevision = `barcode-caption-clearance-20261127-v2:${new URL(import.meta.url).pathname.split('/').pop() ?? 'app'}`;
+const labelRenderRevision = `part-caption-spacing-origin-copy-20261127-v1:${new URL(import.meta.url).pathname.split('/').pop() ?? 'app'}`;
 function labelUrl(record) { return `/api/records/${record.id}/label.svg?v=${encodeURIComponent(selectedBatch.value?.updated_at ?? record.updated_at ?? '')}&r=${encodeURIComponent(labelRenderRevision)}`; }
 function onLabelImageLoad() { labelImageLoading.value = false; labelImageFailed.value = false; }
 function onLabelImageError() { labelImageLoading.value = false; labelImageFailed.value = true; }
