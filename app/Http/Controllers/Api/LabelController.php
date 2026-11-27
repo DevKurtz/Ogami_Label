@@ -86,7 +86,7 @@ class LabelController extends Controller
         };
         $qrMarkup = $renderQr($qrValue, 600, 12, 110, 110, 3);
         $generator = new BarcodeGeneratorSVG();
-        $barcode = function (string $code, int $x, int $y, int $width, int $height, ?string $barcodeType = null) use ($generator): string {
+        $barcode = function (string $code, int $x, int $y, int $width, int $height, ?string $barcodeType = null, bool $stretchToFrame = false) use ($generator): string {
             if (trim($code) === '' || strlen($code) > 255 || preg_match('/[^\x20-\x7E]/', $code)) return '';
             try {
                 $raw = $generator->getBarcode($code, $barcodeType ?? $generator::TYPE_CODE_128, 2, 48);
@@ -97,7 +97,7 @@ class LabelController extends Controller
                 $quietZone = 20; // 10 narrow modules on either side, required for reliable scanning.
                 if (count($viewBox) === 4) $viewBox[2] = (float) $viewBox[2] + 2 * $quietZone;
                 $paddedViewBox = implode(' ', $viewBox);
-                return sprintf('<svg x="%d" y="%d" width="%d" height="%d" viewBox="%s"><title>%s</title><g transform="translate(%d 0)">%s</g></svg>', $x, $y, $width, $height, e($paddedViewBox), e($code), $quietZone, $inner);
+                return sprintf('<svg x="%d" y="%d" width="%d" height="%d" viewBox="%s" preserveAspectRatio="%s"><title>%s</title><g transform="translate(%d 0)">%s</g></svg>', $x, $y, $width, $height, e($paddedViewBox), $stretchToFrame ? 'none' : 'xMidYMid meet', e($code), $quietZone, $inner);
             } catch (\Throwable) {
                 return '';
             }
@@ -147,6 +147,9 @@ class LabelController extends Controller
                 if ($isLegacyLayout && ($element['type'] ?? '') === 'text' && ($element['field'] ?? '') === 'partNumber' && $clipY < 143) {
                     $clipX = 0; $clipY = 0; $clipW = 650; $clipH = 143;
                 }
+                if ($isLegacyLayout && ($element['type'] ?? '') === 'barcode' && ($element['field'] ?? '') === 'quantityCode' && $clipY >= 200 && $clipY < 289) {
+                    $clipX = 3; $clipY = 146; $clipW = 247; $clipH = 140;
+                }
                 $svg[] = sprintf('<clipPath id="element-clip-%d"><rect x="%s" y="%s" width="%s" height="%s"/></clipPath>', $index, $clipX, $clipY, $clipW, $clipH);
             }
             $svg[] = '</defs>';
@@ -173,13 +176,15 @@ class LabelController extends Controller
                 // the last digit on the right. Keep the symbol inside the quantity cell
                 // while aligning its right edge with the printed value.
                 if ($isLegacyLayout && $type === 'barcode' && $field === 'quantityCode' && $y >= 200 && $y < 289) {
-                    $x = 68; $w = 180;
+                    // Match the client guide: keep a clear left quiet zone, broaden
+                    // the bars, and finish close to the quantity value's right edge.
+                    $x = 23; $w = 224;
                 }
                 if ($isLegacyLayout && $type === 'text' && $field === 'serialCode' && $y >= 405) {
                     $x = 38; $y = 518; $w = 361; $h = 12;
                 }
                 if ($isLegacyLayout && $type === 'text' && $field === 'quantityCode' && $y >= 250 && $y < 300) {
-                    $x = 68; $y = 274; $w = 180; $h = 12;
+                    $x = 40; $y = 274; $w = 190; $h = 12;
                 }
                 if ($isLegacyLayout && $type === 'text' && $field === 'partNumberCode' && $y < 143) {
                     $x = 100; $y = 129; $w = 460; $h = 12;
@@ -195,7 +200,8 @@ class LabelController extends Controller
                     continue;
                 }
                 if ($type === 'barcode' && trim($value) !== '') {
-                    $svg[] = sprintf('<g clip-path="url(#element-clip-%d)">%s</g>', $elementIndex, $barcode($value, (int) $x, (int) $y, (int) $w, (int) $h, $isLegacyLayout ? $legacyBarcodeType($value) : null));
+                    $fitQuantityBarcode = $isLegacyLayout && $field === 'quantityCode';
+                    $svg[] = sprintf('<g clip-path="url(#element-clip-%d)">%s</g>', $elementIndex, $barcode($value, (int) $x, (int) $y, (int) $w, (int) $h, $isLegacyLayout ? $legacyBarcodeType($value) : null, $fitQuantityBarcode));
                     continue;
                 }
                 $size = max(8, min(64, (int) ($element['fontSize'] ?? 20)));
@@ -235,7 +241,7 @@ class LabelController extends Controller
         if ($qrMarkup !== '') $svg[] = '<g clip-path="url(#clip-qr)">'.$qrMarkup.'</g>';
         $svg[] = $text(8,167,'QUANTITY',17,'start','quantity'); $svg[] = $text(8,193,'(Q)',17,'start','quantity'); $svg[] = $text(162,232,$data['quantity'] ?? '',55,'middle','quantity',230);
         $quantityCode = (string) ($data['quantityCode'] ?? '');
-        $svg[] = '<g clip-path="url(#clip-quantity)">'.$barcode($quantityCode,68,240,180,31,$legacyBarcodeType($quantityCode)).'</g>'; $quantityCaption = $legacyBarcodeCaption($quantityCode); $svg[] = sprintf('<text x="158" y="284" text-anchor="middle" font-family="Arial,sans-serif" font-size="10"%s clip-path="url(#clip-quantity)">%s</text>', $quantityCaption !== '' && $legacyBarcodeType($quantityCode) === $generator::TYPE_CODE_39 ? ' textLength="180" lengthAdjust="spacing"' : '', e($quantityCaption));
+        $svg[] = '<g clip-path="url(#clip-quantity)">'.$barcode($quantityCode,23,240,224,31,$legacyBarcodeType($quantityCode),true).'</g>'; $quantityCaption = $legacyBarcodeCaption($quantityCode); $svg[] = sprintf('<text x="135" y="284" text-anchor="middle" font-family="Arial,sans-serif" font-size="10"%s clip-path="url(#clip-quantity)">%s</text>', $quantityCaption !== '' && $legacyBarcodeType($quantityCode) === $generator::TYPE_CODE_39 ? ' textLength="190" lengthAdjust="spacing"' : '', e($quantityCaption));
         $svg[] = $text(260,167,'PARTS DESCRIPTION',17,'start','description'); $svg[] = $text(400,211,$data['partName'] ?? '',22,'middle','description',270);
         $svg[] = $text(552,167,'MODEL NAME',17,'start','model'); $svg[] = $text(652,211,$data['modelName'] ?? '',22,'middle','model',200);
         $svg[] = $text(260,245,'CARTON WEIGHT (Kg)',17,'start','weight'); $svg[] = $text(400,279,$data['cartonWeight'] ?? '',25,'middle','weight',270);

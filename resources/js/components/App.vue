@@ -267,7 +267,7 @@ function makeLegacyTemplate() {
     text('', 'PART NO.', 8, 5, 150, 22, 17); text('', '(P)', 8, 25, 60, 22, 17); text('partNumber', '', 0, 20, 650, 52, 62, 'center');
     barcode('partNumberCode', 100, 78, 460, 45); text('partNumberCode', '', 100, 129, 460, 12, 10, 'center'); add('qr', 'qrCode', '', 600, 12, 110, 110);
     text('', 'QUANTITY', 8, 146, 180, 22, 17); text('', '(Q)', 8, 172, 60, 22, 17); text('quantity', '', 71, 185, 190, 49, 55);
-    barcode('quantityCode', 38, 240, 188, 31); text('quantityCode', '', 38, 274, 188, 12, 10, 'center');
+    barcode('quantityCode', 23, 240, 224, 31); text('quantityCode', '', 40, 274, 190, 12, 10, 'center');
     text('', 'PARTS DESCRIPTION', 260, 146, 275, 22, 17); text('partName', '', 260, 180, 280, 35, 22, 'center');
     text('', 'MODEL NAME', 552, 146, 205, 22, 17); text('modelName', '', 552, 180, 205, 35, 22, 'center');
     text('', 'CARTON WEIGHT (Kg)', 260, 224, 275, 22, 17); text('cartonWeight', '', 260, 250, 280, 35, 25, 'center');
@@ -308,6 +308,12 @@ function openEditor() {
                 element.x = 0;
                 element.w = 650;
                 element.align = 'center';
+            }
+            if (element.type === 'barcode' && element.field === 'quantityCode' && Number(element.y) >= 200 && Number(element.y) < 289) {
+                element.x = 23; element.y = 240; element.w = 224; element.h = 31;
+            }
+            if (element.type === 'text' && element.field === 'quantityCode' && Number(element.y) >= 250 && Number(element.y) < 300) {
+                element.x = 40; element.y = 274; element.w = 190; element.h = 12; element.align = 'center';
             }
         });
     }
