@@ -248,7 +248,7 @@ function makeLegacyTemplate() {
     text('', 'SUPPLIER NUMBER (V)', 8, 294, 245, 22, 17); text('supplierNumber', '', 35, 319, 220, 34, 22);
     barcode('supplierCode', 45, 354, 180, 36); text('supplierCode', '', 45, 390, 180, 12, 10);
     text('', 'MFG DATE', 275, 294, 245, 22, 17); text('mfgDate', '', 285, 328, 250, 38, 25);
-    text('', 'SUPPLIER PN', 545, 294, 205, 22, 17); text('', '(2P)', 545, 318, 205, 22, 17);
+    text('', 'SUPPLIER PN', 545, 294, 205, 22, 17); text('', '(2P)', 545, 318, 205, 22, 17); text('supplierPn', '', 550, 328, 195, 38, 22);
     text('', 'SERIAL NO.', 8, 410, 180, 22, 17); text('', '(S)', 8, 438, 45, 22, 17); text('serialNo', '', 55, 435, 390, 32, 22);
     barcode('serialCode', 25, 474, 405, 45); text('serialCode', '', 25, 515, 405, 12, 10);
     text('', 'MADE IN PHILIPPINE', 480, 410, 270, 22, 17); text('', 'PHILIPPINES OGAMI', 485, 458, 260, 30, 17); text('', 'CORPORATION', 485, 485, 260, 30, 17);
@@ -276,7 +276,6 @@ function openEditor() {
     templateElements.value = structuredClone(Array.isArray(savedElements) && savedElements.length ? savedElements : makeLegacyTemplate());
     const isLegacyLayout = templateElements.value.some((element) => String(element.id ?? '').startsWith('legacy-'));
     if (isLegacyLayout) {
-        templateElements.value = templateElements.value.filter((element) => !(element.type === 'text' && element.field === 'supplierPn'));
         templateElements.value.forEach((element) => {
             if (element.type === 'text' && element.field === 'partNumber' && Number(element.y) < 150) element.align = 'center';
         });
@@ -382,11 +381,11 @@ async function deleteBatch(batch) {
     historyMessage.value = '';
     try {
         await request(`/api/batches/${batch.id}`, { method: 'DELETE' });
+        batches.value = batches.value.filter((item) => item.id !== batch.id);
         if (selectedBatch.value?.id === batch.id) {
             selectedBatch.value = null;
             selectedRecord.value = null;
         }
-        await refreshBatches();
         historyMessage.value = `Workbook folder “${batch.name}” and its labels were deleted.`;
         notify('success', 'Folder deleted', 'The workbook and its labels were removed.');
     } catch (exception) { historyError.value = exception.message; notify('error', 'Could not delete folder', exception.message); }
@@ -404,15 +403,16 @@ async function deleteRecord(record) {
     try {
         await request(`/api/records/${record.id}`, { method: 'DELETE' });
         if (batchId) {
-            const updatedBatch = await request(`/api/batches/${batchId}`);
+            const remainingRecords = records.value.filter((item) => item.id !== record.id);
+            const updatedBatch = { ...selectedBatch.value, row_count: remainingRecords.length, records: remainingRecords };
             selectedBatch.value = updatedBatch;
+            batches.value = batches.value.map((item) => item.id === batchId ? { ...item, row_count: remainingRecords.length } : item);
             if (deletingSelectedRecord) {
-                selectedRecord.value = updatedBatch.records[Math.min(previousIndex, updatedBatch.records.length - 1)] ?? null;
+                selectedRecord.value = remainingRecords[Math.min(previousIndex, remainingRecords.length - 1)] ?? null;
             } else {
-                selectedRecord.value = updatedBatch.records.find((item) => item.id === selectedRecord.value?.id) ?? null;
+                selectedRecord.value = remainingRecords.find((item) => item.id === selectedRecord.value?.id) ?? null;
             }
         }
-        await refreshBatches();
         historyMessage.value = `Row ${record.row_number} label was deleted.`;
         notify('success', 'Label deleted', `Row ${record.row_number} was removed from this workbook.`);
     } catch (exception) { historyError.value = exception.message; notify('error', 'Could not delete label', exception.message); }
@@ -514,7 +514,7 @@ async function rasterizeLabelForPdf(record, width = 2300) {
     const jpeg = await new Promise((resolve, reject) => canvas.toBlob(
         (blob) => blob ? resolve(blob) : reject(new Error('The browser could not encode a label image for the PDF.')),
         'image/jpeg',
-        1,
+        0.96,
     ));
     return { width, height, bytes: new Uint8Array(await jpeg.arrayBuffer()), jpeg: true };
 }
@@ -602,10 +602,17 @@ async function downloadBatchPdf(batch = selectedBatch.value) {
         if (!batchRecords.length) throw new Error('This folder has no label records to export.');
         pdfProgress.value = { current: 0, total: batchRecords.length };
         const images = [];
-        for (const record of batchRecords) {
+        const parallelLabelLoads = 4;
+        for (let start = 0; start < batchRecords.length; start += parallelLabelLoads) {
             pdfStage.value = 'Loading labels';
-            try { images.push(await rasterizeLabelForPdf(record)); }
-            catch (exception) { throw new Error(`PDF stopped at Row ${record.row_number}: ${exception.message}`); }
+            const pageGroup = batchRecords.slice(start, start + parallelLabelLoads);
+            const results = await Promise.allSettled(pageGroup.map((record) => rasterizeLabelForPdf(record)));
+            const failed = results.findIndex((result) => result.status === 'rejected');
+            if (failed >= 0) {
+                const record = pageGroup[failed];
+                throw new Error(`PDF stopped at Row ${record.row_number}: ${results[failed].reason?.message ?? 'The label image could not be loaded.'}`);
+            }
+            images.push(...results.map((result) => result.value));
             pdfProgress.value = { current: images.length, total: batchRecords.length };
             // Give the browser a paint opportunity so the per-row progress is visible.
             await new Promise((resolve) => window.requestAnimationFrame(() => resolve()));

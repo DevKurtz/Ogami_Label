@@ -114,12 +114,11 @@ class LabelController extends Controller
                 }
                 $size = max(8, min(64, (int) ($element['fontSize'] ?? 20)));
                 if ($isLegacyLayout && $type === 'text') {
-                    if ($field === 'supplierPn') continue;
                     $fontPoints = match ($field) {
                         'partNumber' => 40,
                         'quantity' => 36,
                         'cartonWeight', 'mfgDate' => 16,
-                        'partName', 'modelName', 'supplierNumber', 'serialNo' => 14,
+                        'partName', 'modelName', 'supplierNumber', 'supplierPn', 'serialNo' => 14,
                         'partNumberCode' => 6.7,
                         'quantityCode', 'supplierCode', 'serialCode' => 6.5,
                         default => 11,
@@ -154,7 +153,7 @@ class LabelController extends Controller
         $svg[] = $text(8,312,'SUPPLIER NUMBER (V)',17,'start','supplier'); $svg[] = $text(132,348,$data['supplierNumber'] ?? '',22,'middle','supplier',230);
         $svg[] = '<g clip-path="url(#clip-supplier)">'.$barcode($data['supplierCode'] ?? '',45,354,180,36).'</g>'; $svg[] = $text(135,396,$data['supplierCode'] ?? '',10,'middle','supplier',180);
         $svg[] = $text(275,312,'MFG DATE',17,'start','date'); $svg[] = $text(400,363,$data['mfgDate'] ?? '',25,'middle','date',240);
-        $svg[] = $text(545,312,'SUPPLIER PN',17,'start','supplier-pn'); $svg[] = $text(545,336,'(2P)',17,'start','supplier-pn');
+        $svg[] = $text(545,312,'SUPPLIER PN',17,'start','supplier-pn'); $svg[] = $text(545,336,'(2P)',17,'start','supplier-pn'); $svg[] = $text(647,363,$data['supplierPn'] ?? '',22,'middle','supplier-pn',190);
         $svg[] = $text(8,429,'SERIAL NO.',17,'start','serial'); $svg[] = $text(8,457,'(S)',17,'start','serial'); $svg[] = $text(235,459,$data['serialNo'] ?? '',22,'middle','serial',430);
         $svg[] = '<g clip-path="url(#clip-serial)">'.$barcode($data['serialCode'] ?? '',25,474,405,45).'</g>'; $svg[] = $text(225,528,$data['serialCode'] ?? '',10,'middle','serial',405);
         $svg[] = $text(480,429,'MADE IN PHILIPPINE',17,'start','origin'); $svg[] = $text(615,481,'PHILIPPINES OGAMI',17,'middle','origin',260); $svg[] = $text(615,506,'CORPORATION',17,'middle','origin',260);

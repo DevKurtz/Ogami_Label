@@ -85,8 +85,7 @@ class BatchController extends Controller
 
         DB::transaction(function () use ($ownedRecord, $batch) {
             $ownedRecord->delete();
-            $batch->row_count = $batch->records()->count();
-            $batch->save();
+            $batch->decrement('row_count');
         });
 
         return response()->json(['message' => 'Label record deleted.', 'batch_id' => $batch->id]);
