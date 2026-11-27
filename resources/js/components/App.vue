@@ -514,10 +514,11 @@ async function downloadLabel(record) {
     }
 }
 
-async function rasterizeLabelForPdf(record, width = 2300) {
+async function rasterizeLabelForPdf(record, svgMarkup, width = 2300) {
     const image = new Image();
     image.decoding = 'async';
-    image.src = labelUrl(record);
+    const svgUrl = URL.createObjectURL(new Blob([svgMarkup], { type: 'image/svg+xml;charset=utf-8' }));
+    image.src = svgUrl;
     const loadImage = typeof image.decode === 'function'
         ? image.decode()
         : new Promise((resolve, reject) => {
@@ -529,9 +530,12 @@ async function rasterizeLabelForPdf(record, width = 2300) {
     try {
         await Promise.race([
             loadImage,
-            new Promise((_, reject) => { imageTimeout = window.setTimeout(() => reject(new Error(`Loading Row ${record.row_number} took too long. Please refresh History and retry.`)), 20000); }),
+            new Promise((_, reject) => { imageTimeout = window.setTimeout(() => reject(new Error(`Preparing Row ${record.row_number} took too long. Please retry the PDF download.`)), 20000); }),
         ]);
-    } finally { window.clearTimeout(imageTimeout); }
+    } finally {
+        window.clearTimeout(imageTimeout);
+        URL.revokeObjectURL(svgUrl);
+    }
 
     const height = Math.round(width * 124.5 / 174.5);
     const canvas = document.createElement('canvas');
@@ -635,20 +639,29 @@ async function downloadBatchPdf(batch = selectedBatch.value) {
         if (!batchRecords.length) throw new Error('This folder has no label records to export.');
         pdfProgress.value = { current: 0, total: batchRecords.length };
         const images = [];
-        const parallelLabelLoads = 4;
-        for (let start = 0; start < batchRecords.length; start += parallelLabelLoads) {
+        const labelsPerRequest = 12;
+        const parallelRasterizations = 4;
+        for (let start = 0; start < batchRecords.length; start += labelsPerRequest) {
             pdfStage.value = 'Loading labels';
-            const pageGroup = batchRecords.slice(start, start + parallelLabelLoads);
-            const results = await Promise.allSettled(pageGroup.map((record) => rasterizeLabelForPdf(record)));
-            const failed = results.findIndex((result) => result.status === 'rejected');
-            if (failed >= 0) {
-                const record = pageGroup[failed];
-                throw new Error(`PDF stopped at Row ${record.row_number}: ${results[failed].reason?.message ?? 'The label image could not be loaded.'}`);
+            const pageGroup = batchRecords.slice(start, start + labelsPerRequest);
+            const payload = await request(`/api/batches/${batch.id}/label-svgs?offset=${start}&limit=${labelsPerRequest}`);
+            if (!Array.isArray(payload.labels) || payload.labels.length !== pageGroup.length || payload.labels.some((label, index) => label.id !== pageGroup[index].id)) {
+                throw new Error(`The server returned ${payload.labels?.length ?? 0} label image(s) for rows ${start + 1}–${start + pageGroup.length}; expected ${pageGroup.length}. Refresh History and try again.`);
             }
-            images.push(...results.map((result) => result.value));
-            pdfProgress.value = { current: images.length, total: batchRecords.length };
-            // Give the browser a paint opportunity so the per-row progress is visible.
-            await new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+            for (let groupStart = 0; groupStart < pageGroup.length; groupStart += parallelRasterizations) {
+                const records = pageGroup.slice(groupStart, groupStart + parallelRasterizations);
+                const labelSvgs = payload.labels.slice(groupStart, groupStart + parallelRasterizations);
+                const results = await Promise.allSettled(records.map((record, index) => rasterizeLabelForPdf(record, labelSvgs[index].svg)));
+                const failed = results.findIndex((result) => result.status === 'rejected');
+                if (failed >= 0) {
+                    const record = records[failed];
+                    throw new Error(`PDF stopped at Row ${record.row_number}: ${results[failed].reason?.message ?? 'The label image could not be prepared.'}`);
+                }
+                images.push(...results.map((result) => result.value));
+                pdfProgress.value = { current: images.length, total: batchRecords.length };
+                // Give the browser a paint opportunity so the per-row progress is visible.
+                await new Promise((resolve) => window.requestAnimationFrame(() => resolve()));
+            }
         }
         pdfStage.value = 'Building PDF';
         await new Promise((resolve) => window.requestAnimationFrame(() => resolve()));

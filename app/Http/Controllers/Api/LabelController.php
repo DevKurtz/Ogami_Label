@@ -4,11 +4,13 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\LabelRecord;
+use App\Models\WorkbookBatch;
 use Endroid\QrCode\Encoding\Encoding;
 use Endroid\QrCode\ErrorCorrectionLevel;
 use Endroid\QrCode\QrCode;
 use Endroid\QrCode\Writer\SvgWriter;
 use Illuminate\Http\Response;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 use Picqer\Barcode\BarcodeGeneratorSVG;
@@ -18,6 +20,39 @@ class LabelController extends Controller
     public function show(Request $request, LabelRecord $record): Response
     {
         $request->user()->batches()->whereKey($record->batch_id)->firstOrFail();
+        return $this->renderLabel($record);
+    }
+
+    public function showBatch(Request $request, WorkbookBatch $batch): JsonResponse
+    {
+        $ownedBatch = $request->user()->batches()->whereKey($batch->getKey())->firstOrFail();
+        $offset = max(0, $request->integer('offset', 0));
+        $limit = min(20, max(1, $request->integer('limit', 12)));
+        $records = $ownedBatch->records()
+            ->orderBy('row_number')
+            ->offset($offset)
+            ->limit($limit)
+            ->get();
+
+        $labels = $records->map(function (LabelRecord $record) use ($ownedBatch) {
+            $record->setRelation('batch', $ownedBatch);
+
+            return [
+                'id' => $record->getKey(),
+                'row_number' => $record->row_number,
+                'svg' => $this->renderLabel($record)->getContent(),
+            ];
+        });
+
+        return response()->json([
+            'offset' => $offset,
+            'total' => (int) $ownedBatch->row_count,
+            'labels' => $labels,
+        ])->header('Cache-Control', 'private, no-store');
+    }
+
+    private function renderLabel(LabelRecord $record): Response
+    {
         $data = $record->data;
         $batch = $record->batch;
         $qrValue = trim($record->qr_code ?? '');
