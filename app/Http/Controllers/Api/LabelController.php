@@ -123,6 +123,14 @@ class LabelController extends Controller
                 $field = (string) ($element['field'] ?? '');
                 $value = $field === '' ? (string) ($element['label'] ?? '') : (string) ($data[$field] ?? collect($data['customFields'] ?? [])->firstWhere('name', $field)['value'] ?? '');
                 $type = $element['type'] ?? 'text';
+                // Keep legacy serial bars inside the serial cell with even side margins.
+                // Older saved templates extended this barcode right to the cell border.
+                if ($isLegacyLayout && $type === 'barcode' && $field === 'serialCode' && $y >= 405) {
+                    $x = 38; $w = 361; $h = 39;
+                }
+                if ($isLegacyLayout && $type === 'text' && $field === 'serialCode' && $y >= 405) {
+                    $x = 38; $y = 508; $w = 361; $h = 12;
+                }
                 $centerPartNumber = $isLegacyLayout && $type === 'text' && $field === 'partNumber' && $y < 143;
                 if ($centerPartNumber) { $x = 0; $w = 650; }
                 if ($type === 'qr' && trim($value) === '') $value = $qrValue;
@@ -152,6 +160,7 @@ class LabelController extends Controller
                 $baseline = min(535, $y + min($h - 2, $size + 4));
                 $align = in_array($element['align'] ?? 'left', ['left', 'center', 'right'], true) ? ($element['align'] ?? 'left') : 'left';
                 if ($centerPartNumber) $align = 'center';
+                if ($isLegacyLayout && $type === 'text' && in_array($field, ['partNumberCode', 'quantityCode', 'supplierCode', 'serialCode'], true)) $align = 'center';
                 $textX = $align === 'center' ? $x + $w / 2 : ($align === 'right' ? $x + $w - 3 : $x + 3);
                 $svg[] = sprintf('<text x="%s" y="%s" text-anchor="%s" font-family="Arial,sans-serif" font-size="%.2f" clip-path="url(#element-clip-%d)">%s</text>', $textX, $baseline, $align === 'left' ? 'start' : ($align === 'right' ? 'end' : 'middle'), $size, $elementIndex, e($display));
             }
@@ -182,7 +191,7 @@ class LabelController extends Controller
         $svg[] = $text(552,314,'SUPPLIER PN',17,'start','supplier-pn'); $svg[] = $text(552,348,'(2P)',17,'start','supplier-pn');
         $svg[] = $text(8,430,'SERIAL NO',17,'start','serial'); $svg[] = $text(8,456,'(S)',17,'start','serial'); $svg[] = $text(219,460,$data['serialNo'] ?? '',22,'middle','serial',405);
         $serialCode = (string) ($data['serialCode'] ?? '');
-        $svg[] = '<g clip-path="url(#clip-serial)">'.$barcode($serialCode,32,474,405,45,$legacyBarcodeType($serialCode)).'</g>'; $svg[] = $text(225,518,$legacyBarcodeCaption($serialCode),10,'middle','serial',405);
+        $svg[] = '<g clip-path="url(#clip-serial)">'.$barcode($serialCode,38,474,361,39,$legacyBarcodeType($serialCode)).'</g>'; $svg[] = $text(218.5,518,$legacyBarcodeCaption($serialCode),10,'middle','serial',361);
         $svg[] = $text(444,430,'MADE IN PHILIPPINE',17,'start','origin'); $svg[] = $text(600,482,'PHILIPPINES OGAMI',17,'middle','origin',300); $svg[] = $text(600,503,'CORPORATION',17,'middle','origin',300);
         $svg[] = '</svg>';
 
