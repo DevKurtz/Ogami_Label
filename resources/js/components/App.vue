@@ -465,7 +465,7 @@ function moveRecord(step) {
     const next = records.value[recordIndex.value + step]; if (next) selectRecord(next);
 }
 // Bump this when the server-side SVG renderer changes so immutable cached label images are refreshed.
-const labelRenderRevision = `caption-edge-alignment-20261127:${new URL(import.meta.url).pathname.split('/').pop() ?? 'app'}`;
+const labelRenderRevision = `quantity-barcode-edge-alignment-20261127:${new URL(import.meta.url).pathname.split('/').pop() ?? 'app'}`;
 function labelUrl(record) { return `/api/records/${record.id}/label.svg?v=${encodeURIComponent(selectedBatch.value?.updated_at ?? record.updated_at ?? '')}&r=${encodeURIComponent(labelRenderRevision)}`; }
 function onLabelImageLoad() { labelImageLoading.value = false; labelImageFailed.value = false; }
 function onLabelImageError() { labelImageLoading.value = false; labelImageFailed.value = true; }
