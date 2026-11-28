@@ -271,19 +271,19 @@ function makeLegacyTemplate() {
 
     [[0,0,760,143],[0,143,253,146],[253,143,293,77],[546,143,214,77],[253,220,293,69],[546,220,214,69],[0,289,253,116],[253,289,293,116],[253,350,293,55],[546,289,214,116],[0,405,437,130],[437,405,323,130]].forEach((cell) => box(...cell));
     text('', 'PART NO.', 8, 5, 150, 22, 17); text('', '(P)', 8, 25, 60, 22, 17); text('partNumber', '', 0, 20, 650, 52, 62, 'center');
-    barcode('partNumberCode', 95, 78, 460, 45); text('partNumberCode', '', 95, 129, 460, 12, 10, 'center'); add('qr', 'qrCode', '', 600, 12, 110, 110);
+    barcode('partNumberCode', 95, 75, 460, 42); text('partNumberCode', '', 95, 120, 460, 20, 10, 'center'); add('qr', 'qrCode', '', 600, 12, 110, 110);
     text('', 'QUANTITY', 8, 146, 180, 22, 17); text('', '(Q)', 8, 172, 60, 22, 17); text('quantity', '', 71, 185, 190, 49, 55);
-    barcode('quantityCode', 23, 240, 224, 31); text('quantityCode', '', 40, 274, 190, 12, 10, 'center');
+    barcode('quantityCode', 23, 237, 224, 28); text('quantityCode', '', 40, 268, 190, 20, 10, 'center');
     text('', 'PARTS DESCRIPTION', 260, 146, 275, 22, 17); text('partName', '', 260, 180, 280, 35, 22, 'center');
     text('', 'MODEL NAME', 552, 146, 205, 22, 17); text('modelName', '', 552, 180, 205, 35, 22, 'center');
     text('', 'CARTON WEIGHT (Kg)', 260, 224, 275, 22, 17); text('cartonWeight', '', 260, 250, 280, 35, 25, 'center');
     text('', 'COMPONENT S/N', 552, 224, 205, 22, 17);
     text('', 'SUPPLIER NUMBER', 8, 293, 245, 22, 17); text('', '(V)', 8, 319, 60, 22, 17); text('supplierNumber', '', 8, 319, 225, 34, 22, 'right');
-    barcode('supplierCode', 23, 354, 224, 36); text('supplierCode', '', 40, 391, 190, 12, 10, 'center');
+    barcode('supplierCode', 23, 351, 224, 28); text('supplierCode', '', 40, 382, 190, 20, 10, 'center');
     text('', 'MFG DAT', 260, 293, 275, 22, 17); text('mfgDate', '', 260, 315, 280, 38, 25, 'center');
     text('', 'SUPPLIER PN', 552, 293, 205, 22, 17); text('', '(2P)', 552, 327, 205, 22, 17);
     text('', 'SERIAL NO', 8, 410, 180, 22, 17); text('', '(S)', 8, 435, 45, 22, 17); text('serialNo', '', 15, 435, 405, 32, 22, 'center');
-    barcode('serialCode', 38, 474, 361, 39); text('serialCode', '', 38, 518, 361, 12, 10, 'center');
+    barcode('serialCode', 38, 470, 361, 32); text('serialCode', '', 38, 505, 361, 20, 10, 'center');
     text('', 'MADE IN PHILIPPINES', 444, 410, 310, 22, 17); text('', 'PHILIPPINES OGAMI', 450, 460, 300, 30, 17); text('', 'CORPORATION', 450, 482, 300, 30, 17);
     return elements;
 }
@@ -316,10 +316,10 @@ function openEditor() {
                 element.align = 'center';
             }
             if (element.type === 'barcode' && element.field === 'quantityCode' && Number(element.y) >= 200 && Number(element.y) < 289) {
-                element.x = 23; element.y = 240; element.w = 224; element.h = 31;
+                element.x = 23; element.y = 237; element.w = 224; element.h = 28;
             }
             if (element.type === 'text' && element.field === 'quantityCode' && Number(element.y) >= 250 && Number(element.y) < 300) {
-                element.x = 40; element.y = 274; element.w = 190; element.h = 12; element.align = 'center';
+                element.x = 40; element.y = 268; element.w = 190; element.h = 20; element.align = 'center';
             }
         });
     }
@@ -477,7 +477,7 @@ function moveRecord(step) {
     const next = records.value[recordIndex.value + step]; if (next) selectRecord(next);
 }
 // Bump this when the server-side SVG renderer changes so immutable cached label images are refreshed.
-const labelRenderRevision = `part-caption-spacing-origin-copy-20261127-v1:${new URL(import.meta.url).pathname.split('/').pop() ?? 'app'}`;
+const labelRenderRevision = `barcode-overlap-fix-20261128-v1:${new URL(import.meta.url).pathname.split('/').pop() ?? 'app'}`;
 function labelUrl(record) { return `/api/records/${record.id}/label.svg?v=${encodeURIComponent(selectedBatch.value?.updated_at ?? record.updated_at ?? '')}&r=${encodeURIComponent(labelRenderRevision)}`; }
 function onLabelImageLoad() { labelImageLoading.value = false; labelImageFailed.value = false; }
 function onLabelImageError() { labelImageLoading.value = false; labelImageFailed.value = true; }
