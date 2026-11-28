@@ -271,15 +271,15 @@ function makeLegacyTemplate() {
 
     [[0,0,760,143],[0,143,253,146],[253,143,293,77],[546,143,214,77],[253,220,293,69],[546,220,214,69],[0,289,253,116],[253,289,293,116],[253,350,293,55],[546,289,214,116],[0,405,437,130],[437,405,323,130]].forEach((cell) => box(...cell));
     text('', 'PART NO.', 8, 5, 150, 22, 17); text('', '(P)', 8, 25, 60, 22, 17); text('partNumber', '', 0, 20, 650, 52, 62, 'center');
-    barcode('partNumberCode', 100, 78, 460, 45); text('partNumberCode', '', 100, 129, 460, 12, 10, 'center'); add('qr', 'qrCode', '', 600, 12, 110, 110);
+    barcode('partNumberCode', 95, 78, 460, 45); text('partNumberCode', '', 95, 129, 460, 12, 10, 'center'); add('qr', 'qrCode', '', 600, 12, 110, 110);
     text('', 'QUANTITY', 8, 146, 180, 22, 17); text('', '(Q)', 8, 172, 60, 22, 17); text('quantity', '', 71, 185, 190, 49, 55);
     barcode('quantityCode', 23, 240, 224, 31); text('quantityCode', '', 40, 274, 190, 12, 10, 'center');
     text('', 'PARTS DESCRIPTION', 260, 146, 275, 22, 17); text('partName', '', 260, 180, 280, 35, 22, 'center');
     text('', 'MODEL NAME', 552, 146, 205, 22, 17); text('modelName', '', 552, 180, 205, 35, 22, 'center');
     text('', 'CARTON WEIGHT (Kg)', 260, 224, 275, 22, 17); text('cartonWeight', '', 260, 250, 280, 35, 25, 'center');
     text('', 'COMPONENT S/N', 552, 224, 205, 22, 17);
-    text('', 'SUPPLIER NUMBER', 8, 293, 245, 22, 17); text('', '(V)', 8, 319, 60, 22, 17); text('supplierNumber', '', 85, 319, 230, 34, 22, 'center');
-    barcode('supplierCode', 35, 354, 190, 36); text('supplierCode', '', 35, 391, 190, 12, 10, 'center');
+    text('', 'SUPPLIER NUMBER', 8, 293, 245, 22, 17); text('', '(V)', 8, 319, 60, 22, 17); text('supplierNumber', '', 8, 319, 225, 34, 22, 'right');
+    barcode('supplierCode', 23, 354, 224, 36); text('supplierCode', '', 40, 391, 190, 12, 10, 'center');
     text('', 'MFG DAT', 260, 293, 275, 22, 17); text('mfgDate', '', 260, 315, 280, 38, 25, 'center');
     text('', 'SUPPLIER PN', 552, 293, 205, 22, 17); text('', '(2P)', 552, 327, 205, 22, 17);
     text('', 'SERIAL NO', 8, 410, 180, 22, 17); text('', '(S)', 8, 435, 45, 22, 17); text('serialNo', '', 15, 435, 405, 32, 22, 'center');
