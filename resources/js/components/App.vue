@@ -56,6 +56,8 @@ const pdfProgressPercent = computed(() => pdfStage.value === 'Building PDF' ? 10
 const downloadError = ref('');
 const deleteEnabled = ref(false);
 const userName = document.querySelector('meta[name="user-name"]')?.content ?? '';
+const desktopMode = document.querySelector('meta[name="desktop-mode"]')?.content === 'true';
+const desktopInstallerUrl = document.querySelector('meta[name="desktop-installer-url"]')?.content ?? '';
 let redirectingAfterAuthFailure = false;
 const deletingId = ref(null);
 const deletingFolderName = ref('');
@@ -737,7 +739,7 @@ onBeforeUnmount(() => {
         <nav class="flex h-full gap-2">
           <button v-for="page in ['upload','history']" :key="page" @click="activePage=page" class="border-b-2 px-4 capitalize" :class="activePage===page?'border-blue-600 font-bold text-blue-700':'border-transparent text-slate-500'">{{ page }}</button>
         </nav>
-        <div class="ml-auto flex items-center gap-3 text-xs text-slate-500"><span>{{ userName }}</span><button @click="logout" class="rounded-lg border border-slate-300 px-3 py-2 font-medium text-slate-700 hover:bg-slate-50">Sign out</button></div>
+        <div class="ml-auto flex items-center gap-3 text-xs text-slate-500"><span v-if="desktopMode" class="rounded-full bg-emerald-50 px-3 py-1.5 font-semibold text-emerald-700">Offline · saved on this device</span><template v-else><a v-if="desktopInstallerUrl" :href="desktopInstallerUrl" download target="_blank" rel="noopener noreferrer" class="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 font-semibold text-indigo-800 hover:bg-indigo-100">Download desktop app</a><button v-else type="button" disabled title="Set the desktop installer download URL to publish this download." class="cursor-not-allowed rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-medium text-slate-400">Desktop app · preparing</button><span>{{ userName }}</span><button @click="logout" class="rounded-lg border border-slate-300 px-3 py-2 font-medium text-slate-700 hover:bg-slate-50">Sign out</button></template></div>
       </div>
     </header>
     <main class="mx-auto max-w-7xl px-5 py-8">
@@ -804,7 +806,7 @@ onBeforeUnmount(() => {
       </section>
 
       <section v-if="activePage==='history'" class="space-y-4">
-        <div v-if="!deleteEnabled" class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Sign in again to manage your workbook history.</div>
+        <div v-if="!deleteEnabled && !desktopMode" class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Sign in again to manage your workbook history.</div>
         <div v-if="historyMessage" role="status" class="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{{ historyMessage }}</div>
         <div v-if="historyError" role="alert" class="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{{ historyError }}</div>
         <div class="grid gap-5 lg:grid-cols-[390px_1fr]">

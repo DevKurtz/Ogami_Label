@@ -1,0 +1,56 @@
+name: Build Windows desktop release
+
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up PHP and Composer
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: pdo_sqlite, sqlite3, mbstring, zip, openssl, fileinfo
+          tools: composer:v2
+
+      - name: Install project dependencies
+        shell: pwsh
+        run: |
+          npm ci
+          composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+
+      - name: Prepare the bundled PHP runtime
+        shell: pwsh
+        run: |
+          $env:OGAMI_PHP_RUNTIME = Split-Path (Get-Command php).Source
+          npm run desktop:runtime
+
+      - name: Download the matching Electron runtime
+        shell: pwsh
+        run: node node_modules/electron/install.js
+
+      - name: Build Windows installer
+        shell: pwsh
+        run: npm run desktop:dist
+
+      - name: Publish installer to GitHub Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Ogami Label Studio ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release/Ogami-Label-Studio-Setup.exe

@@ -8,6 +8,10 @@ return [
         'redirect' => env('GOOGLE_REDIRECT_URI', rtrim(env('APP_URL', 'http://localhost'), '/').'/auth/google/callback'),
     ],
 
+    'desktop' => [
+        'installer_url' => env('DESKTOP_INSTALLER_URL', 'https://github.com/DevKurtz/Ogami_Label/releases/latest/download/Ogami-Label-Studio-Setup.exe'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

@@ -14,6 +14,11 @@ $app = Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->trustProxies(at: '*');
+        $middleware->web(append: [\App\Services\UseLocalDesktopAccount::class]);
+        $middleware->prependToPriorityList(
+            before: \Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests::class,
+            prepend: \App\Services\UseLocalDesktopAccount::class,
+        );
         $middleware->append(NoStoreResponse::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

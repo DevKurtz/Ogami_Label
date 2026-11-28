@@ -1,23 +1,106 @@
 {
     "$schema": "https://www.schemastore.org/package.json",
+    "name": "ogami-label-studio",
     "private": true,
+    "version": "1.0.0",
+    "description": "Offline desktop label design and PDF export for Ogami workbooks",
+    "author": "Ogami Label Studio",
     "type": "module",
     "scripts": {
         "build": "vite build",
-        "dev": "vite"
+        "dev": "vite",
+        "desktop:dev": "electron .",
+        "desktop:build": "vite build --configLoader runner --outDir desktop/build --emptyOutDir false",
+        "desktop:runtime": "powershell -ExecutionPolicy Bypass -File desktop/prepare-runtime.ps1 -PhpRuntime $env:OGAMI_PHP_RUNTIME",
+        "desktop:dist": "npm run desktop:build && electron-builder --win nsis --config.electronDist=node_modules/electron/dist"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.3.5",
+        "@vitejs/plugin-vue": "^6.0.11",
         "axios": "^1.11.0",
         "concurrently": "^9.0.1",
+        "electron": "^45.5.0",
+        "electron-builder": "^26.18.0",
         "laravel-vite-plugin": "^2.0.0",
-        "tailwindcss": "^4.3.5",
-        "vite": "^7.0.7"
-    },
-    "dependencies": {
-        "@vitejs/plugin-vue": "^6.0.11",
         "qrcode": "^1.5.4",
         "sweetalert2": "^11.26.26",
+        "tailwindcss": "^4.3.5",
+        "vite": "^7.0.7",
         "vue": "^3.5.46"
+    },
+    "main": "desktop/main.cjs",
+    "build": {
+        "appId": "com.ogami.labelstudio",
+        "productName": "Ogami Label Studio",
+        "electronLanguages": [
+            "en-US"
+        ],
+        "directories": {
+            "output": "release"
+        },
+        "files": [
+            "desktop/main.cjs",
+            "package.json"
+        ],
+        "extraResources": [
+            {
+                "from": ".",
+                "to": "app",
+                "filter": [
+                    "**/*",
+                    "!node_modules/**",
+                    "!.git/**",
+                    "!.env",
+                    "!.env.*",
+                    "!desktop/**",
+                    "!desktop-release/**",
+                    "!release/**",
+                    "!.npm-cache/**",
+                    "!.composer-cache/**",
+                    "!__pycache__/**",
+                    "!docs/**",
+                    "!Ogami-Label-Studio-Tutorial.gif",
+                    "!public/build/**",
+                    "!database/*.sqlite",
+                    "!storage/logs/**",
+                    "!tmp/**",
+                    "!tests/**",
+                    "!tutorial-assets/**",
+                    "!legacy-prototype/**"
+                ]
+            },
+            {
+                "from": "desktop/runtime/php",
+                "to": "php",
+                "filter": [
+                    "**/*"
+                ]
+            },
+            {
+                "from": "desktop/build",
+                "to": "app/public/build",
+                "filter": [
+                    "**/*"
+                ]
+            }
+        ],
+        "win": {
+            "target": [
+                "nsis"
+            ],
+            "artifactName": "Ogami-Label-Studio-Setup.${ext}"
+        },
+        "nsis": {
+            "oneClick": false,
+            "perMachine": false,
+            "allowToChangeInstallationDirectory": true,
+            "createDesktopShortcut": true,
+            "createStartMenuShortcut": true
+        }
+    },
+    "allowScripts": {
+        "electron-winstaller@5.4.0": true,
+        "esbuild@0.28.2": true,
+        "electron@45.5.0": true
     }
 }
