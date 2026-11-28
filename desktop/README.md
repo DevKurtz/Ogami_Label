@@ -16,6 +16,8 @@ npm run desktop:dist
 
 The installer output is written to `release/`. The app stores its database and logs in the current Windows user's application-data directory. Workbook records remain on that computer unless the user exports/backups the database.
 
+The NSIS installer is configured per-machine (all users); Windows may request administrator approval during installation.
+
 The web header links to the latest GitHub Release installer by default. To publish an update, push a tag named `desktop-vX.Y.Z`; the included GitHub Actions workflow builds the Windows installer and attaches it to the release. Set `DESKTOP_INSTALLER_URL` only if you choose a different release host.
 
 The installer is Windows-only. Keep the PHP distribution's license and notices with the release. `npm install` resolves the Electron packaging dependencies listed in the project manifest.

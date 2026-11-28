@@ -95,6 +95,9 @@ async function createWindow() {
         window = new BrowserWindow({
             width: 1440, height: 960, minWidth: 1040, minHeight: 700,
             backgroundColor: '#f1f5f9', title: 'Ogami Label Studio',
+            icon: app.isPackaged
+                ? path.join(process.resourcesPath, 'ogami-icon.ico')
+                : path.join(__dirname, 'assets', 'ogami-icon.ico'),
             webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true },
         });
         window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));

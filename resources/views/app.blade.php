@@ -10,6 +10,7 @@
     <meta name="desktop-installer-url" content="{{ $desktopInstallerUrl }}">
     <title>Ogami Label Studio</title>
     <link rel="icon" type="image/svg+xml" href="/ogami-mark.svg">
+    <link rel="apple-touch-icon" href="/ogami-mark.svg">
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body><div id="app"></div></body>

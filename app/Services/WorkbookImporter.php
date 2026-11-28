@@ -115,10 +115,29 @@ class WorkbookImporter
                         if (count(array_filter($values, fn ($value) => trim((string) $value) !== ''))) $sample[] = $values;
                     }
                     $dataRows = 0;
+                    $completeRows = 0;
+                    $skippedRows = 0;
+                    $legacyFormat = $this->isLegacyFormat($groupHeaders);
+                    $requiredFields = $legacyFormat ? $this->legacyRequiredFields() : [];
                     for ($row = $headerRow + 1; $row <= $lastSegmentRow; $row++) {
+                        $rowValues = [];
                         for ($column = $startColumn; $column <= $endColumn; $column++) {
-                            if (trim((string) $sheet->getCell([$column, $row])->getFormattedValue()) !== '') { $dataRows++; break; }
+                            $rowValues[$column] = trim((string) $sheet->getCell([$column, $row])->getFormattedValue());
                         }
+                        if (!array_filter($rowValues, fn ($value) => $value !== '')) continue;
+                        $dataRows++;
+                        if ($legacyFormat) {
+                            $rowComplete = true;
+                            foreach ($requiredFields as $aliases) {
+                                $fieldPresent = false;
+                                foreach ($rowValues as $column => $value) {
+                                    if (in_array($this->normalize($headers[$column]), $aliases, true) && $value !== '') { $fieldPresent = true; break; }
+                                }
+                                if (!$fieldPresent) { $rowComplete = false; break; }
+                            }
+                            if (!$rowComplete) { $skippedRows++; continue; }
+                        }
+                        $completeRows++;
                     }
                     $tables[] = [
                         'id' => "s{$sheetIndex}-r{$headerRow}-c{$startColumn}-{$endColumn}",
@@ -135,7 +154,7 @@ class WorkbookImporter
                         'endColumn' => $endColumn,
                         'endRow' => $lastSegmentRow,
                         'headers' => array_map(fn ($column) => $headers[$column] !== '' ? $headers[$column] : "Column {$column}", range($startColumn, $endColumn)),
-                        'legacyFormat' => $this->isLegacyFormat($groupHeaders),
+                        'legacyFormat' => $legacyFormat,
                         'sample' => $sample,
                         'codeColumns' => array_values(array_map(function ($header) {
                             $normalized = $this->normalize($header);
@@ -143,6 +162,9 @@ class WorkbookImporter
                             return ['header' => $header, 'suggestedType' => $suggested];
                         }, array_filter($groupHeaders, fn ($header) => preg_match('/code|barcode|qr/i', $header)))),
                         'rowCount' => $dataRows,
+                        'completeRowCount' => $completeRows,
+                        'skippedRowCount' => $skippedRows,
+                        'requiredFields' => $legacyFormat ? array_map(fn ($group) => $group[0], $requiredFields) : [],
                     ];
                 }
             }
@@ -211,7 +233,10 @@ class WorkbookImporter
             }
         }
 
+        $legacyFormat = $this->isLegacyFormat(array_values($headers));
+        $requiredFields = $legacyFormat ? $this->legacyRequiredFields() : [];
         $rows = [];
+        $skippedRows = [];
         $errors = [];
         for ($rowNumber = $headerRow + 1; $rowNumber <= $lastRow; $rowNumber++) {
             $row = array_fill_keys(array_keys(self::FIELDS), '');
@@ -246,16 +271,46 @@ class WorkbookImporter
                 continue;
             }
 
+            if ($legacyFormat) {
+                $missingFields = [];
+                foreach ($requiredFields as $field => $aliases) {
+                    $value = $row[$field] ?? '';
+                    if (trim((string) $value) === '') $missingFields[] = self::FIELD_LABELS[$field] ?? $field;
+                }
+                if ($missingFields) {
+                    $skippedRows[] = ['row_number' => $rowNumber, 'missing_fields' => $missingFields];
+                    continue;
+                }
+            }
+
             $rows[] = ['row_number' => $rowNumber, 'data' => $row];
         }
 
-        if (!$rows) throw new RuntimeException('No data rows were found in the selected table.');
         if ($errors) throw new RuntimeException(implode("\n", array_slice($errors, 0, 12)));
+        if (!$rows) {
+            if ($skippedRows) throw new RuntimeException('No complete rows were found. Every data row is missing one or more required Ogami label fields.');
+            throw new RuntimeException('No data rows were found in the selected table.');
+        }
 
         return [
             'headers' => array_values($headers),
             'unmappedHeaders' => array_values(array_filter($headers, fn ($header) => !isset($mappedHeaders[$header]))),
             'rows' => $rows,
+            'skippedRows' => $skippedRows,
+        ];
+    }
+
+    private function legacyRequiredFields(): array
+    {
+        return [
+            'partNumber' => ['PARTNUMBER1', 'PARTNUMBER', 'PARTNO'],
+            'partName' => ['PARTNAME', 'PARTSDESCRIPTION', 'DESCRIPTION'],
+            'quantity' => ['QUANTITY', 'QTY'],
+            'modelName' => ['MODELNAME', 'MODEL'],
+            'cartonWeight' => ['CARTONWEIGHT', 'CARTONWEIGHTKG', 'WEIGHT'],
+            'supplierNumber' => ['SUPPLIERNUMBER', 'SUPPLIERNO', 'VENDORNUMBER'],
+            'mfgDate' => ['MFGDATE', 'MANUFACTURINGDATE'],
+            'serialNo' => ['SERIALNO', 'SERIALNUMBER'],
         ];
     }
 

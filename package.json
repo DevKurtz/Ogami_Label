@@ -2,7 +2,7 @@
     "$schema": "https://www.schemastore.org/package.json",
     "name": "ogami-label-studio",
     "private": true,
-    "version": "1.0.0",
+    "version": "1.0.1",
     "description": "Offline desktop label design and PDF export for Ogami workbooks",
     "author": "Ogami Label Studio",
     "type": "module",
@@ -32,6 +32,7 @@
     "build": {
         "appId": "com.ogami.labelstudio",
         "productName": "Ogami Label Studio",
+        "icon": "desktop/assets/ogami-icon.ico",
         "electronLanguages": [
             "en-US"
         ],
@@ -82,9 +83,14 @@
                 "filter": [
                     "**/*"
                 ]
+            },
+            {
+                "from": "desktop/assets/ogami-icon.ico",
+                "to": "ogami-icon.ico"
             }
         ],
         "win": {
+            "icon": "desktop/assets/ogami-icon.ico",
             "target": [
                 "nsis"
             ],
@@ -92,7 +98,7 @@
         },
         "nsis": {
             "oneClick": false,
-            "perMachine": false,
+            "perMachine": true,
             "allowToChangeInstallationDirectory": true,
             "createDesktopShortcut": true,
             "createStartMenuShortcut": true

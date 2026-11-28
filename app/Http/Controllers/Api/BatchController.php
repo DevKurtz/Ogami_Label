@@ -127,6 +127,7 @@ class BatchController extends Controller
                     'endColumn' => ['required', 'integer', 'min:1'],
                     'endRow' => ['required', 'integer', 'min:2'],
                     'rowCount' => ['nullable', 'integer', 'min:1', 'max:50000'],
+                    'completeRowCount' => ['nullable', 'integer', 'min:1', 'max:50000'],
                     'codeTypes' => ['present', 'array'],
                     'codeTypes.*' => [Rule::in(['qr', 'barcode', 'text', 'ignore'])],
                     'labelTemplate' => ['nullable', 'array'],
@@ -144,8 +145,9 @@ class BatchController extends Controller
                 ])->validate();
                 if (isset($imports[$table['id']])) throw new RuntimeException('A table was selected more than once.');
                 $imported = $importer->import($validated['file']->getRealPath(), $table);
-                if (isset($table['rowCount']) && (int) $table['rowCount'] !== count($imported['rows'])) {
-                    throw new RuntimeException("The selected table changed after analysis. Preview showed {$table['rowCount']} data rows, but the uploaded file contains ".count($imported['rows']).". Please select the file and analyze it again. No records were saved.");
+                $expectedRows = $table['completeRowCount'] ?? $table['rowCount'] ?? null;
+                if ($expectedRows !== null && (int) $expectedRows !== count($imported['rows'])) {
+                    throw new RuntimeException("The selected table changed after analysis. Preview showed {$expectedRows} complete label rows, but the uploaded file contains ".count($imported['rows']).". Please select the file and analyze it again. No records were saved.");
                 }
                 $legacyFormat = $importer->isLegacyFormat($imported['headers']);
                 if (!$legacyFormat && empty($table['labelTemplate']['elements'])) {
