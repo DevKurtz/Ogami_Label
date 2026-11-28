@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\LabelRecord;
 use App\Models\WorkbookBatch;
+use App\Services\MfgDateFormatter;
 use Endroid\QrCode\Encoding\Encoding;
 use Endroid\QrCode\ErrorCorrectionLevel;
 use Endroid\QrCode\QrCode;
@@ -273,19 +274,11 @@ class LabelController extends Controller
 
     private function formatMfgDateForLabel(string $value): string
     {
-        $value = trim($value);
-        if (preg_match('/^(\d{4})(\d{2})(\d{2})$/', $value, $date)) {
-            return sprintf('%04d/%02d/%02d', $date[1], $date[2], $date[3]);
+        if (preg_match('/^(\d{4})(\d{2})(\d{2})$/', trim($value), $date)) {
+            $value = "{$date[1]}/{$date[2]}/{$date[3]}";
         }
-        if (preg_match('/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/', $value, $date)) {
-            return sprintf('%04d/%02d/%02d', $date[1], $date[2], $date[3]);
-        }
-        if (preg_match('/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2}|\d{4})$/', $value, $date)) {
-            $year = (int) $date[3];
-            if (strlen($date[3]) === 2) $year += $year < 70 ? 2000 : 1900;
-            return sprintf('%04d/%02d/%02d', $year, $date[2], $date[1]);
-        }
-        return $value;
+
+        return MfgDateFormatter::format($value);
     }
 }
 

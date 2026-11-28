@@ -5,7 +5,6 @@ namespace App\Services;
 use Illuminate\Support\Str;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
-use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use RuntimeException;
 
 class WorkbookImporter
@@ -290,9 +289,10 @@ class WorkbookImporter
     {
         $value = trim($value);
         if (preg_match('/^(\d{2})(\d{2})(\d{2})$/', $value, $parts)) {
-            return "{$parts[1]}.{$parts[2]}.{$parts[3]}";
+            $value = "{$parts[1]}.{$parts[2]}.{$parts[3]}";
         }
-        return $value;
+
+        return MfgDateFormatter::format($value);
     }
 }
 

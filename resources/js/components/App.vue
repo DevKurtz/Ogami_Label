@@ -42,7 +42,7 @@ const query = ref('');
 const loading = ref(false);
 const error = ref('');
 const success = ref(null);
-const activePage = ref('upload');
+const activePage = ref(window.location.pathname.toLowerCase().includes('history') || new URLSearchParams(window.location.search).get('page') === 'history' ? 'history' : 'upload');
 const labelImage = ref(null);
 const labelImageLoading = ref(false);
 const labelImageFailed = ref(false);
@@ -56,6 +56,7 @@ const pdfProgressPercent = computed(() => pdfStage.value === 'Building PDF' ? 10
 const downloadError = ref('');
 const deleteEnabled = ref(false);
 const userName = document.querySelector('meta[name="user-name"]')?.content ?? '';
+let redirectingAfterAuthFailure = false;
 const deletingId = ref(null);
 const deletingFolderName = ref('');
 const deletingFolder = computed(() => typeof deletingId.value === 'string' && deletingId.value.startsWith('batch-'));
@@ -155,7 +156,12 @@ watch(
     { immediate: true },
 );
 async function request(url, options = {}) {
-    const response = await fetch(url, { credentials: 'same-origin', ...options, headers: { Accept: 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '', ...options.headers } });
+    const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store', ...options, headers: { Accept: 'application/json', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content ?? '', ...options.headers } });
+    if (response.status === 401 && url.startsWith('/api/') && !redirectingAfterAuthFailure) {
+        redirectingAfterAuthFailure = true;
+        window.location.replace('/history');
+        throw new Error('Your sign-in session expired. Sign in again to load History.');
+    }
     const body = await response.json();
     if (!response.ok) throw new Error(Object.values(body.errors ?? {})[0]?.[0] ?? body.message ?? 'Something went wrong. Please try again.');
     return body;
@@ -694,12 +700,33 @@ async function downloadBatchPdf(batch = selectedBatch.value) {
 }
 
 onMounted(async () => {
+    window.addEventListener('pageshow', handlePageShow);
     historyLoading.value = true;
     try { await refreshBatches(); } catch (exception) { error.value = exception.message; notify('error', 'Could not load History', exception.message); }
     finally { historyLoading.value = false; }
     try { deleteEnabled.value = (await request('/api/delete-status')).enabled; } catch { deleteEnabled.value = false; }
 });
-onBeforeUnmount(endCanvasInteraction);
+function handlePageShow(event) {
+    if (!event.persisted) return;
+    const previouslyOpenBatchId = selectedBatch.value?.id;
+    historyLoading.value = true;
+    error.value = '';
+    selectedBatch.value = null;
+    selectedRecord.value = null;
+    refreshBatches()
+        .then(async () => {
+            deleteEnabled.value = (await request('/api/delete-status')).enabled;
+            if (previouslyOpenBatchId && batches.value.some((batch) => batch.id === previouslyOpenBatchId)) {
+                await openBatch(previouslyOpenBatchId);
+            }
+        })
+        .catch((exception) => { error.value = exception.message; })
+        .finally(() => { historyLoading.value = false; });
+}
+onBeforeUnmount(() => {
+    window.removeEventListener('pageshow', handlePageShow);
+    endCanvasInteraction();
+});
 </script>
 
 <template>
