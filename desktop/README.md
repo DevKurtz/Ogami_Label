@@ -4,7 +4,7 @@ The desktop shell starts the existing Laravel application on a loopback-only por
 
 ## Windows release prerequisites
 
-The end-user installer includes Electron and a trimmed PHP 8.2 runtime with `pdo_sqlite`, `sqlite3`, `mbstring`, `zip`, `xml`, `dom`, `fileinfo`, and `openssl`, plus the Laravel `vendor` tree and built Vite assets. The runtime goes in `desktop/runtime/php/`. Do not ship `.env`, its secrets, a developer database, logs, or user data.
+The end-user installer includes Electron and a trimmed PHP 8.2 runtime with `pdo_sqlite`, `sqlite3`, `mbstring`, `zip`, `xml`, `dom`, `fileinfo`, `openssl`, and `gd`, plus the Laravel `vendor` tree and built Vite assets. The runtime goes in `desktop/runtime/php/`. Do not ship `.env`, its secrets, a developer database, logs, or user data.
 
 From a Windows release machine, point `OGAMI_PHP_RUNTIME` to a PHP 8.2 distribution folder that includes the required extensions, then prepare it and build:
 

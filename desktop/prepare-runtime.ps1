@@ -8,7 +8,7 @@ $source = (Resolve-Path -LiteralPath $PhpRuntime).Path
 $target = Join-Path $PSScriptRoot 'runtime\php'
 if (-not (Test-Path -LiteralPath (Join-Path $source 'php.exe'))) { throw "php.exe was not found in $source" }
 
-foreach ($extension in @('php_fileinfo.dll', 'php_pdo_sqlite.dll', 'php_sqlite3.dll', 'php_mbstring.dll', 'php_zip.dll', 'php_openssl.dll')) {
+foreach ($extension in @('php_fileinfo.dll', 'php_pdo_sqlite.dll', 'php_sqlite3.dll', 'php_mbstring.dll', 'php_zip.dll', 'php_openssl.dll', 'php_gd.dll')) {
     if (-not (Test-Path -LiteralPath (Join-Path $source "ext\$extension"))) { throw "Required PHP extension $extension is missing from $source\ext" }
 }
 
@@ -27,7 +27,7 @@ Copy-Item -LiteralPath (Join-Path $source 'php.exe') -Destination $target
 Get-ChildItem -LiteralPath $source -File -Filter '*.dll' |
     Where-Object { $_.Name -notmatch '^icu.*\.dll$' } |
     Copy-Item -Destination $target
-foreach ($extension in @('php_fileinfo.dll', 'php_pdo_sqlite.dll', 'php_sqlite3.dll', 'php_mbstring.dll', 'php_zip.dll', 'php_openssl.dll')) {
+foreach ($extension in @('php_fileinfo.dll', 'php_pdo_sqlite.dll', 'php_sqlite3.dll', 'php_mbstring.dll', 'php_zip.dll', 'php_openssl.dll', 'php_gd.dll')) {
     Copy-Item -LiteralPath (Join-Path $source "ext\$extension") -Destination $extensionsTarget
 }
 foreach ($notice in @('license.txt', 'readme-redist-bins.txt')) {
@@ -40,7 +40,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $source 'php.ini-development'))) { t
 $ini = Join-Path $source 'php.ini-development'
 $configuration = Get-Content -LiteralPath $ini -Raw
 $configuration = $configuration -replace '(?m)^;?\s*extension_dir\s*=.*$', 'extension_dir="ext"'
-foreach ($extension in @('fileinfo', 'pdo_sqlite', 'sqlite3', 'mbstring', 'zip', 'openssl')) {
+foreach ($extension in @('fileinfo', 'pdo_sqlite', 'sqlite3', 'mbstring', 'zip', 'openssl', 'gd')) {
     $configuration = $configuration -replace "(?m)^;\s*extension\s*=\s*$extension\s*$", "extension=$extension"
 }
 Set-Content -LiteralPath (Join-Path $target 'php.ini') -Value $configuration -Encoding ascii
