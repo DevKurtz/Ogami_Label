@@ -17,7 +17,7 @@ npm run build
 php artisan serve
 ```
 
-Open http://127.0.0.1:8000. Google sign-in requires `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI`; local development also needs a Google OAuth client configured for `http://127.0.0.1:8000/auth/google/callback`. Do not commit `.env` or share database credentials in chat.
+Open http://127.0.0.1:8000. Web accounts use administrator-provisioned usernames and passwords; there is no public sign-up. After migrating, create a local web account with `php artisan ogami:user "Local Ogami User"`. The password and confirmation are entered without being shown or saved to source files. Do not commit `.env` or share database credentials in chat.
 
 For frontend development with automatic rebuilds, use two terminals: `php artisan serve` and `npm run dev`.
 
@@ -26,10 +26,10 @@ For frontend development with automatic rebuilds, use two terminals: `php artisa
 1. Create a Supabase project and get its PostgreSQL connection settings from **Connect**. Use the direct connection for a host with IPv6 access or the session pooler connection for supported IPv4 environments. The project and database password are not included in this source tree.
 2. Install PHP `pdo_pgsql` on the hosting runtime.
 3. Copy `.env.example` to the host's secret environment and fill in `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, and `DB_PASSWORD`. Keep `DB_CONNECTION=pgsql`, `DB_SSLMODE=require`, `APP_ENV=production`, and `APP_DEBUG=false`.
-4. Install dependencies and build assets, then run `php artisan key:generate --force`, `php artisan migrate --force`, and `php artisan ogami:create-user owner@example.com` on the host.
+4. Install dependencies and build assets, then run `php artisan key:generate --force`, `php artisan migrate --force`, and `php artisan ogami:user "<approved username>" --name="<display name>"` on the host. Enter the password at the hidden prompt. If several old Google accounts exist, add `--email=...` for the account whose workbook history should be kept.
 5. Serve the Laravel `public/` directory over HTTPS. Configure backups, private durable storage for uploaded workbooks, and log monitoring before production use.
 
-The app requires Google sign-in to view or upload workbook data. Every workbook belongs to the Google account that uploaded it; only that account can view its rows and labels or delete individual labels and entire workbook folders. Older workbook rows with no recorded owner remain hidden rather than being exposed to all users. Uploads are rate-limited. The validated row data and labels are persisted in PostgreSQL; source workbook files are not retained, which avoids relying on Vercel's ephemeral filesystem.
+The web app requires an approved username and password; there is no public account creation or Google sign-in. Login attempts are rate-limited, and passwords are stored as hashes. Every workbook belongs to the account that uploaded it; only that account can view its rows and labels or delete individual labels and entire workbook folders. Older workbook rows with no recorded owner remain hidden rather than being exposed to all users. The validated row data and labels are persisted in PostgreSQL; source workbook files are not retained, which avoids relying on Vercel's ephemeral filesystem.
 
 ## Workbook columns and code accuracy
 
@@ -39,7 +39,7 @@ The QR code is generated from that row's exact `QR CODE` value. Code 128 symbols
 
 ## Vercel deployment
 
-The repository includes `Dockerfile.vercel` for Vercel's container runtime. Set `APP_KEY`, `APP_ENV=production`, `APP_DEBUG=false`, `APP_URL=https://ogami-label.vercel.app`, `DB_CONNECTION=pgsql`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_SSLMODE=require`, `SESSION_DRIVER=database`, `CACHE_STORE=database`, `LOG_CHANNEL=stderr`, `LARAVEL_STORAGE_PATH=/tmp/ogami-storage`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REDIRECT_URI=https://ogami-label.vercel.app/auth/google/callback` in Vercel's Environment Variables. In Google Cloud, create an OAuth client of type Web application, add `https://ogami-label.vercel.app` as an authorized JavaScript origin and the callback URL above as an authorized redirect URI. Keep the client secret private. The container applies Laravel migrations on startup. Point the Supabase pooler and Vercel container at nearby regions. The Vercel `.vercel.app` project URL is first-come-first-served; setting project name `ogami-label` requests the desired address but does not reserve it.
+The repository includes `Dockerfile.vercel` for Vercel's container runtime. Set `APP_KEY`, `APP_ENV=production`, `APP_DEBUG=false`, `APP_URL=https://ogami-label.vercel.app`, `DB_CONNECTION=pgsql`, `DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_SSLMODE=require`, `SESSION_DRIVER=database`, `CACHE_STORE=database`, `LOG_CHANNEL=stderr`, and `LARAVEL_STORAGE_PATH=/tmp/ogami-storage` in Vercel's Environment Variables. The container applies Laravel migrations on startup. Provision the approved web account with `vercel env run --environment production --project ogami-label -- php artisan ogami:user "<approved username>" --name="<display name>"`; the command prompts for the password without echoing it. Point the Supabase pooler and Vercel container at nearby regions. The Vercel `.vercel.app` project URL is first-come-first-served; setting project name `ogami-label` requests the desired address but does not reserve it.
 
 The app limits Excel upload files to 4 MB to fit within Vercel request payload limits. Larger workbooks require direct-to-object-storage uploads.
 
