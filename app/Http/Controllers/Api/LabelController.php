@@ -87,15 +87,17 @@ class LabelController extends Controller
         };
         $qrMarkup = $renderQr($qrValue, 600, 12, 110, 110, 3);
         $generator = new BarcodeGeneratorSVG();
-        $barcode = function (string $code, int $x, int $y, int $width, int $height, ?string $barcodeType = null, bool $stretchToFrame = false) use ($generator): string {
+        $barcode = function (string $code, int $x, int $y, int $width, int $height, ?string $barcodeType = null, bool $stretchToFrame = false, float $moduleWidth = 2.0, int $quietZone = 20) use ($generator): string {
             if (trim($code) === '' || strlen($code) > 255 || preg_match('/[^\x20-\x7E]/', $code)) return '';
             try {
-                $raw = $generator->getBarcode($code, $barcodeType ?? $generator::TYPE_CODE_128, 2, 48);
+                $raw = $generator->getBarcode($code, $barcodeType ?? $generator::TYPE_CODE_128, $moduleWidth, 48);
                 preg_match('/viewBox="([^"]+)"/', $raw, $bounds);
                 $inner = preg_replace('/^.*?<svg[^>]*>|<\/svg>.*$/s', '', $raw) ?? '';
                 $inner = preg_replace('/<\?xml[^>]*>|<!DOCTYPE[^>]*>/i', '', $inner) ?? $inner;
                 $viewBox = preg_split('/\s+/', trim($bounds[1] ?? '0 0 1 1'));
-                $quietZone = 20; // 10 narrow modules on either side, required for reliable scanning.
+                // Leave the requested quiet zone around the encoded bars. Legacy Ogami
+                // barcode frames can use a smaller zone where the label cell itself
+                // provides the surrounding white space shown in the client reference.
                 if (count($viewBox) === 4) $viewBox[2] = (float) $viewBox[2] + 2 * $quietZone;
                 $paddedViewBox = implode(' ', $viewBox);
                 // Use xMidYMin to anchor bars to the top of the frame, preventing
@@ -212,7 +214,8 @@ class LabelController extends Controller
                 }
                 if ($type === 'barcode' && trim($value) !== '') {
                     $fitToLegacyBarcodeFrame = $isLegacyLayout && in_array($field, ['quantityCode', 'supplierCode'], true);
-                    $svg[] = sprintf('<g clip-path="url(#element-clip-%d)">%s</g>', $elementIndex, $barcode($value, (int) $x, (int) $y, (int) $w, (int) $h, $isLegacyLayout ? $legacyBarcodeType($value) : null, $fitToLegacyBarcodeFrame));
+                    $isLegacyPartNumberBarcode = $isLegacyLayout && $field === 'partNumberCode';
+                    $svg[] = sprintf('<g clip-path="url(#element-clip-%d)">%s</g>', $elementIndex, $barcode($value, (int) $x, (int) $y, (int) $w, (int) $h, $isLegacyLayout ? $legacyBarcodeType($value) : null, $fitToLegacyBarcodeFrame, $isLegacyPartNumberBarcode ? 2.5 : 2.0, $isLegacyPartNumberBarcode ? 4 : 20));
                     continue;
                 }
                 $size = max(8, min(64, (int) ($element['fontSize'] ?? 20)));
@@ -240,7 +243,7 @@ class LabelController extends Controller
                 if ($isLegacyCodeCaption) $align = 'center';
                 if ($isLegacyCodeCaption) {
                     $baseline = match ($field) {
-                        'partNumberCode' => 136,
+                        'partNumberCode' => 127,
                         'quantityCode' => 280,
                         'supplierCode' => 395,
                         'serialCode' => 520,
@@ -260,11 +263,11 @@ class LabelController extends Controller
         }
         $svg[] = $text(8,27,'PART NO.',17,'start','part'); $svg[] = $text(8,47,'(P)',17,'start','part'); $svg[] = $text(325,71,$data['partNumber'] ?? '',62,'middle','part',570);
         $partNumberCode = (string) ($data['partNumberCode'] ?? '');
-        $svg[] = '<g clip-path="url(#clip-part)">'.$barcode($partNumberCode,95,75,460,42,$legacyBarcodeType($partNumberCode)).'</g>';
+        $svg[] = '<g clip-path="url(#clip-part)">'.$barcode($partNumberCode,95,75,460,42,$legacyBarcodeType($partNumberCode),false,2.5,4).'</g>';
         $partCaption = $legacyBarcodeCaption($partNumberCode);
         $partCaptionSpacing = $partCaption !== '' && $legacyBarcodeType($partNumberCode) === $generator::TYPE_CODE_39 ? ' textLength="460" lengthAdjust="spacing"' : '';
         // Keep the human-readable Code 39 caption clearly below the bars.
-        $svg[] = sprintf('<text x="325" y="136" text-anchor="middle" font-family="Arial,sans-serif" font-size="10"%s clip-path="url(#clip-part)">%s</text>', $partCaptionSpacing, e($partCaption));
+        $svg[] = sprintf('<text x="325" y="127" text-anchor="middle" font-family="Arial,sans-serif" font-size="10"%s clip-path="url(#clip-part)">%s</text>', $partCaptionSpacing, e($partCaption));
         if ($qrMarkup !== '') $svg[] = '<g clip-path="url(#clip-qr)">'.$qrMarkup.'</g>';
         $svg[] = $text(8,167,'QUANTITY',17,'start','quantity'); $svg[] = $text(8,193,'(Q)',17,'start','quantity'); $svg[] = $text(162,232,$data['quantity'] ?? '',55,'middle','quantity',230);
         $quantityCode = (string) ($data['quantityCode'] ?? '');
